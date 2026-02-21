@@ -1,0 +1,29 @@
+{
+  "name": "youtube-sync",
+  "version": "1.0.0",
+  "description": "Synchronize your YouTube video with others connected to a dedicated server, browser extension.",
+  "homepage": "https://github.com/Narwhalsss360/youtube-sync#readme",
+  "bugs": {
+    "url": "https://github.com/Narwhalsss360/youtube-sync/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Narwhalsss360/youtube-sync.git"
+  },
+  "license": "MIT",
+  "author": "Franklyn Vasquez",
+  "type": "commonjs",
+  "scripts": {},
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "@types/webpack-dev-server": "^4.7.1",
+    "chrome-types": "^0.1.416",
+    "copy-webpack-plugin": "^13.0.1",
+    "ts-loader": "^9.5.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "webpack": "^5.105.2",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.3"
+  }
+}
