@@ -1,3 +1,5 @@
+import { UnexpectedMessageDataError, UnexpectedMessageTypeError } from "./errors";
+
 export enum PlaybackState {
   Playing = "playing",
   Paused = "paused",
@@ -328,6 +330,13 @@ export function propertyAsType<T>(
   return (object[property] as T);
 }
 
+export function wellDefined<T>(object: T | null | undefined, error: Error): T {
+  if (!object) {
+    throw error;
+  }
+  return object;
+}
+
 export enum MessageTypes {
   Error = "message",
   RequestPackagedServiceState = "request-packaged-service-state",
@@ -338,11 +347,55 @@ export interface GenericMessage {
   type: string
 };
 
+export function isGenericMessage(object: any | null | undefined): object is GenericMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (typeof object.type !== "string") {
+    return false;
+  }
+
+  if (object.type.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
 export interface ErrorMessage {
   type: MessageTypes.Error,
   message: string,
   sender: string
 };
+
+export function isErrorMessage(object: any | null | undefined): object is ErrorMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Error) {
+    return false;
+  }
+
+  if (typeof object.message !== "string") {
+    return false;
+  }
+
+  if (typeof object.sender !== "string") {
+    return false;
+  }
+
+  return true;
+}
 
 export interface RequestPackagedServiceStateMessage {
   type: MessageTypes.RequestPackagedServiceState
@@ -353,8 +406,63 @@ export interface PackagedServiceStateMessage {
   packagedServiceState: PackagedServiceState
 };
 
+export function isPackagedServiceStateMessage(object: any | null | undefined): object is PackagedServiceStateMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.PackagedServiceState) {
+    return false;
+  }
+
+  if (!isPackagedServiceState(object.packagedServiceState)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function wellDefinedMessage<T>(
+  typeChecker: (object: any | null | undefined) => object is T,
+  expectedMessageType: MessageTypes,
+  object: GenericMessage | null | undefined,
+  notAMessageError: Error | null = null
+): T {
+  notAMessageError = notAMessageError ?? new Error("Received a non-message type message.");
+  if (typeof object !== "object") {
+    throw notAMessageError;
+  }
+
+  if (object === null) {
+    throw notAMessageError;
+  }
+
+  if (!("type" in object)) {
+    throw notAMessageError;
+  }
+
+  if (typeof object.type !== "string") {
+    throw notAMessageError;
+  }
+
+  if (object.type !== expectedMessageType) {
+    throw new UnexpectedMessageTypeError(expectedMessageType, object.type);
+  }
+
+  if (!typeChecker(object)) {
+    throw new UnexpectedMessageDataError(`The message has unexpected data layout for it's type (${expectedMessageType})`);
+  }
+
+  return object
+}
+
 export type Message = (
   GenericMessage |
+  ErrorMessage |
   RequestPackagedServiceStateMessage |
   PackagedServiceStateMessage
 );

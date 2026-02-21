@@ -1,10 +1,18 @@
+import { ErrorMessageReceived, UnexpectedMessageDataError } from "./errors";
 import browser = chrome;
 import {
+  asType,
+  isErrorMessage,
   MessageTypes,
   PackagedServiceState,
   PackagedServiceStateMessage,
+  wellDefined,
   User,
-  userDefaults
+  userDefaults,
+  isGenericMessage,
+  Message,
+  wellDefinedMessage,
+  ErrorMessage
 } from "./types"
 
 const serviceState: {
@@ -29,15 +37,24 @@ function packageServiceState(): PackagedServiceState {
 }
 
 function processRuntimeMessage(
-  message: any,
+  message: Message,
   sender: browser.runtime.MessageSender,
   sendResponse: (response?: any) => void
 ): boolean | Promise<any> | undefined {
-  if (!("type" in message)) {
+  if (!isGenericMessage(message)) {
     throw new Error("Recieved unknown message");
   }
 
   switch (message.type) {
+    case MessageTypes.Error: {
+      throw new ErrorMessageReceived(
+        wellDefinedMessage(
+          isErrorMessage,
+          MessageTypes.Error,
+          message
+        )
+      );
+    }
     case MessageTypes.RequestPackagedServiceState: {
       const packagedServiceStateMessage: PackagedServiceStateMessage = {
         type: MessageTypes.PackagedServiceState,

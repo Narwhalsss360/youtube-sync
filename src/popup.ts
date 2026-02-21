@@ -1,23 +1,16 @@
 import browser = chrome;
-import { UnexpectedMessageDataError, UnexpectedMessageTypeError } from "./errors";
-import { GenericMessage, isPackagedServiceState, MessageTypes, PackagedServiceState, PackagedServiceStateMessage, propertyAsType } from "./types";
+import { isPackagedServiceStateMessage, MessageTypes, PackagedServiceState, PackagedServiceStateMessage,wellDefinedMessage } from "./types";
 
 let packagedServiceState: PackagedServiceState;
 
 async function main() {
-  const packagedServiceStateMessage: GenericMessage = await browser.runtime.sendMessage({
-    type: MessageTypes.RequestPackagedServiceState
-  });
+  const packagedServiceState = wellDefinedMessage(
+    isPackagedServiceStateMessage,
+    MessageTypes.PackagedServiceState,
+    await browser.runtime.sendMessage({ type: MessageTypes.RequestPackagedServiceState })
+  ).packagedServiceState;
 
-  if (packagedServiceStateMessage.type !== MessageTypes.PackagedServiceState) {
-    throw new UnexpectedMessageTypeError(MessageTypes.PackagedServiceState, packagedServiceStateMessage.type);
-  }
-
-  packagedServiceState =
-    propertyAsType(isPackagedServiceState, packagedServiceStateMessage, "packagedServiceState") ??
-    (() => { throw new UnexpectedMessageDataError("Expected packagedServiceState"); })();
-
-  console.log(packagedServiceStateMessage);
+  console.log(packagedServiceState);
 }
 
 const i = setInterval(

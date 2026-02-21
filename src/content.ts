@@ -1,4 +1,6 @@
-import { PlaybackState, VideoInfo } from "./types";
+import { ErrorMessageReceived }  from "./errors";
+import browser = chrome;
+import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PlaybackState, VideoInfo, wellDefinedMessage } from "./types";
 
 function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) => boolean): HTMLElement | null {
   const parent = elementNode.parentNode;
@@ -198,6 +200,37 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
       .observe(video, { attributes: true, attributeFilter: ["src"] });
     videoSrcChanged();
   });
+}
+
+function processRuntimeMessage(
+  message: Message,
+  sender: browser.runtime.MessageSender,
+  sendResponse: (response?: any) => void
+): boolean | Promise<any> | undefined {
+  if (!isGenericMessage(message)) {
+    throw new Error("Recieved unknown message");
+  }
+
+  switch (message.type) {
+    case MessageTypes.Error: {
+      throw new ErrorMessageReceived(
+        wellDefinedMessage(
+          isErrorMessage,
+          MessageTypes.Error,
+          message
+        )
+      );
+    }
+    default: {
+      console.group("Dropped message:");
+      console.warn("Sender:");
+      console.warn(sender);
+      console.warn("Message:");
+      console.warn(message);
+      console.groupEnd();
+      return;
+    }
+  }
 }
 
 function main() {
