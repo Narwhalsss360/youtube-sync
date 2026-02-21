@@ -14,7 +14,26 @@ const config: Configuration = {
     ],
     popup: [
       path.resolve(__dirname, "src", "popup.ts")
+    ],
+    types: [
+      path.resolve(__dirname, "src", "types.ts")
     ]
+  },
+  output: {
+    path: path.join(__dirname, outputPath),
+    filename: "[name].js"
+  },
+  resolve: {
+    extensions: [".ts", ".js"]
+  },
+  module: {
+    rules: [
+      {
+        test: /\.tsx?$/,
+        loader: 'ts-loader',
+        exclude: /node_modules/,
+      }
+    ],
   },
   plugins: [
     new CopyPlugin({
