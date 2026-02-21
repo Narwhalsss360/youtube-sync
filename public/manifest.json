@@ -26,5 +26,15 @@
         "contentLoader.js"
       ]
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "resources": [
+        "content.js"
+      ]
+    }
   ]
 }

@@ -9,6 +9,9 @@ const config: Configuration = {
     background: [
       path.resolve(__dirname, "src", "background.ts")
     ],
+    content: [
+      path.resolve(__dirname, "src", "content.ts")
+    ],
     contentLoader: [
       path.resolve(__dirname, "src", "contentLoader.ts")
     ],
@@ -21,7 +24,7 @@ const config: Configuration = {
   },
   output: {
     path: path.join(__dirname, outputPath),
-    filename: "[name].js"
+    filename: "[name].js",
   },
   resolve: {
     extensions: [".ts", ".js"]
