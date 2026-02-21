@@ -14,3 +14,9 @@ export class UnexpectedMessageTypeError extends Error {
     super(`Expected '${expected}' message type but received '${received}'.`, options);
   }
 }
+
+export class UnexpectedMessageDataError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}

@@ -1,6 +1,6 @@
 import browser = chrome;
-import { UnexpectedMessageTypeError } from "./errors";
-import { GenericMessage, MessageTypes, PackagedServiceState, PackagedServiceStateMessage } from "./types";
+import { UnexpectedMessageDataError, UnexpectedMessageTypeError } from "./errors";
+import { GenericMessage, isPackagedServiceState, MessageTypes, PackagedServiceState, PackagedServiceStateMessage, propertyAsType } from "./types";
 
 let packagedServiceState: PackagedServiceState;
 
@@ -13,9 +13,17 @@ async function main() {
     throw new UnexpectedMessageTypeError(MessageTypes.PackagedServiceState, packagedServiceStateMessage.type);
   }
 
-  packagedServiceState = (packagedServiceStateMessage as PackagedServiceStateMessage).packagedServiceState;
+  packagedServiceState =
+    propertyAsType(isPackagedServiceState, packagedServiceStateMessage, "packagedServiceState") ??
+    (() => { throw new UnexpectedMessageDataError("Expected packagedServiceState"); })();
 
   console.log(packagedServiceStateMessage);
 }
 
-main()
+const i = setInterval(
+  () => {
+    clearInterval(i);
+    main();
+  },
+  4000
+)
