@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
@@ -103,13 +103,13 @@ function waitForMetadata(): Promise<VideoInfo> {
         if (videoElement.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
           const interval = setInterval(() => {
             clearInterval(interval);
-            reject("timed out");
+            reject("timed out getting metadata");
           }, TIMEOUT);
         } else {
           videoElement.addEventListener("loadeddata", () => {
             const interval = setInterval(() => {
               clearInterval(interval);
-              reject("timed out");
+              reject("timed out getting metadata");
             }, TIMEOUT);
           }, { once: true });
         }
@@ -331,6 +331,7 @@ function main() {
     }
     port.onMessage.addListener(processPortMessage);
     moduleState.backgroundServicePort = port;
+    sendVideoInfo();
     waitForVideoElement().then(video => registerVideoElementEvents(video));
     console.log("Is active YouTube Sync tab.");
     port.onDisconnect.addListener(() => {
@@ -339,11 +340,14 @@ function main() {
       console.log("Is no longer active YouTube Sync tab.");
     });
   });
+
+  (globalThis as any).contentModule = Object.freeze({
+    moduleState,
+    processRuntimeMessage,
+    processPortMessage
+  });
 }
 
-(globalThis as any).contentModule = Object.freeze({
-  moduleState,
-  processRuntimeMessage,
-  processPortMessage,
+(globalThis as any).contentModule = {
   main
-});
+};
