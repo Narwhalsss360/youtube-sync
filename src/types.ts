@@ -25,6 +25,30 @@ export function isEnumValue<T>(
     return (Object.values(enumType) as unknown[]).includes(value);
 }
 
+export interface ComparersDefinitions {
+  [key: string]: (a: any, b: any) => boolean
+};
+
+export function arrayEquals(a: Array<any>, b: Array<any>, compare: undefined | ((a: any, b: any) => boolean) = undefined): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  compare = compare ?? ((a: any, b: any) => a === b);
+  for (let i = 0; i < a.length; i++) {
+    if (!compare(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function propertyEquals(a: any, b: any, property: string, compare: undefined | ((a: any, b: any) => boolean) = undefined): boolean {
+  if (compare !== undefined) {
+    return compare(a[property], b[property]);
+  }
+  return a[property] === b[property];
+}
+
 export interface PlaybackInfo {
   state: PlaybackState,
   currentTime: number,
@@ -61,6 +85,15 @@ export function isPlaybackInfo(object: any | null | undefined): object is Playba
   }
 
   return true;
+}
+
+export function detectPlaybackInfoUpdates(playbackInfo: PlaybackInfo | undefined, newPlaybackInfo: PlaybackInfo): Array<keyof PlaybackInfo> {
+  if (playbackInfo === undefined) {
+    return Object.keys(newPlaybackInfo) as Array<keyof PlaybackInfo>;
+  }
+
+  return Object.keys(playbackInfo)
+    .filter(key => !propertyEquals(playbackInfo, newPlaybackInfo, key)) as Array<keyof PlaybackInfo>;
 }
 
 export interface VideoInfo {
@@ -128,6 +161,19 @@ export function isVideoInfo(object: any | null | undefined): object is VideoInfo
   return true;
 }
 
+export function detectVideoInfoUpdates(videoInfo: VideoInfo | undefined, newVideoInfo: VideoInfo): Array<keyof VideoInfo> {
+  if (videoInfo === undefined) {
+    return Object.keys(newVideoInfo) as Array<keyof VideoInfo>;
+  }
+
+  const comparers: ComparersDefinitions = {
+    playbackInfo: (a: PlaybackInfo, b: PlaybackInfo) => detectPlaybackInfoUpdates(a, b).length === 0
+  };
+
+  return Object.keys(newVideoInfo)
+    .filter(key => !propertyEquals(videoInfo, newVideoInfo, key, comparers[key])) as Array<keyof VideoInfo>;
+}
+
 export interface UserHostingOptions {
   cohostsUUID: Array<string>,
   waitForBufferingFollowers: boolean
@@ -151,6 +197,19 @@ export function isUserHostingOptions(object: any | null | undefined): object is 
   }
 
   return true;
+}
+
+export function detectUserHostingOptionsUpdates(userHostingOptions: UserHostingOptions | undefined, newUserHostingOptions: UserHostingOptions): Array<keyof UserHostingOptions> {
+  if (userHostingOptions === undefined) {
+    return Object.keys(newUserHostingOptions) as Array<keyof UserHostingOptions>;
+  }
+
+  const comparers: ComparersDefinitions = {
+    cohostsUUID: arrayEquals
+  };
+
+  return Object.keys(newUserHostingOptions)
+    .filter(key => !propertyEquals(userHostingOptions, newUserHostingOptions, key, comparers[key])) as Array<keyof UserHostingOptions>;
 }
 
 export const userHostingOptionsDefaults: Readonly<UserHostingOptions> = Object.freeze({
@@ -181,6 +240,15 @@ export function isUserFollowingOptions(object: any | null | undefined): object i
   }
 
   return true;
+}
+
+export function detectUserFollowingOptionsUpdates(userFollowingOptions: UserFollowingOptions | undefined, newUserFollowingOptions: UserFollowingOptions): Array<keyof UserFollowingOptions> {
+  if (userFollowingOptions === undefined) {
+    return Object.keys(newUserFollowingOptions) as Array<keyof UserFollowingOptions>;
+  }
+
+  return Object.keys(newUserFollowingOptions)
+    .filter(key => !propertyEquals(userFollowingOptions, newUserFollowingOptions, key)) as Array<keyof UserFollowingOptions>;
 }
 
 export const userFollowingOptionsDefaults: Readonly<UserFollowingOptions> = Object.freeze({
@@ -257,6 +325,21 @@ export const userDefaults: Readonly<User> = Object.freeze({
   videoInfo: null,
   followingUUID: null
 });
+
+export function detectUserUpdate(user: User | undefined, newUser: User): Array<keyof User> {
+  if (user === undefined) {
+    return Object.keys(newUser) as Array<keyof User>;
+  }
+
+  const comparers: ComparersDefinitions = {
+    hostingOptions: (a: UserHostingOptions, b: UserHostingOptions) => detectUserHostingOptionsUpdates(a, b).length === 0,
+    followingOptions: (a: UserFollowingOptions, b: UserFollowingOptions) => detectUserFollowingOptionsUpdates(a, b).length === 0,
+    videoInfo: (a: VideoInfo, b: VideoInfo) => detectVideoInfoUpdates(a, b).length === 0
+  };
+
+  return Object.keys(newUser)
+    .filter(key => !propertyEquals(user, newUser, key, comparers[key])) as Array<keyof User>;
+}
 
 export interface PackagedServiceState {
   user: User,
