@@ -1,0 +1,137 @@
+html {
+  width: fit-content;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  max-width: fit-content;
+  background-color: hsl(0, 0%, 12%);
+  align-items: center;
+}
+
+.text-div {
+  font-size: inherit;
+}
+
+.forms-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.users {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  min-width: 180px;
+  margin: 0px 4px -8px 4px;
+}
+
+.user {
+  display: grid;
+  grid-template-columns: max-content auto;
+  grid-template-rows: auto min-content auto;
+  max-width: 620px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 5px;
+  background-color: hsl(0, 0%, 18%);
+  margin-bottom: 8px;
+}
+
+.no-current-video {
+  font-weight: bold;
+  text-align: center;
+  grid-column: span 2;
+}
+
+.video-info {
+  display: grid;
+  grid-template-columns: max-content auto;
+  grid-template-rows: min-content;
+  margin-top: 5px;
+  margin-bottom: 5px;
+  max-width: inherit;
+}
+
+.image-container {
+  width: 70px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-container img {
+  border-radius: 50%;
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+}
+
+.svg-container {
+  position: relative;
+  width: 70px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-title-and-channel {
+  margin-left: 8px;
+  margin-right: 8px;
+  height: fit-content;
+  display: grid;
+  grid-template-rows: min-content min-content;
+}
+
+.video-title {
+  display: inline-block;
+  margin: 0;
+  font-size: 14pt;
+}
+
+.channel {
+  display: inline-block;
+  margin: 0;
+}
+
+.playback-status {
+  grid-column: span 2;
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-template-columns: max-content auto;
+}
+
+.timestamps {
+  display: flex;
+  height: 25px;
+  justify-content: flex-start;
+  align-items: flex-end;
+  margin-right: 8px;
+}
+
+.user-status {
+  display: flex;
+  height: 25px;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.user-status button {
+  margin: 1px;
+}
+
+.watch-progress-bar-container {
+  height: 3px;
+  background-color: hsl(0, 0%, 10%);
+  grid-column: span 2;
+  margin-top: 2px;
+}
+
+.watch-progress-bar {
+  width: 0%;
+  height: 100%;
+  background-color: red;
+}
