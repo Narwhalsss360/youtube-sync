@@ -459,7 +459,7 @@ export function wellDefined<T>(object: T | null | undefined, error: Error): T {
 }
 
 export enum MessageTypes {
-  Error = "message",
+  Error = "error",
   RequestPackagedServiceState = "request-packaged-service-state",
   PackagedServiceState = "packaged-service-state",
   VideoInfo = "video-info",
