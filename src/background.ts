@@ -11,7 +11,8 @@ import {
   Message,
   wellDefinedMessage,
   isSetActiveTabMessage,
-  isVideoInfoMessage
+  isVideoInfoMessage,
+  SetActiveTabMessage
 } from "./types"
 
 const serviceState: {
@@ -66,6 +67,13 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
         message
       );
       serviceState.user.videoInfo = videoInfoMessage.videoInfo;
+      (serviceState.users[0] as User).videoInfo = videoInfoMessage.videoInfo;
+
+      const packagedServiceStateMessage: PackagedServiceStateMessage = {
+        type: MessageTypes.PackagedServiceState,
+        packagedServiceState: packageServiceState()
+      };
+      browser.runtime.sendMessage(packagedServiceStateMessage).catch(() => { });
       break;
     }
     default: {
@@ -161,10 +169,60 @@ function processRuntimeMessage(
   }
 }
 
-browser.runtime.onMessage.addListener(processRuntimeMessage);
+async function setCurrentTabAsActiveTab() {
+  const candidates = await browser.tabs.query({
+    active: true,
+  });
 
-(globalThis as any).backgroundSerivce = Object.freeze({
-  serviceState,
-  processRuntimeMessage,
-  getAllTabs: () => browser.tabs.query({})
-});
+  for (const candidate of candidates) {
+    if (!candidate.id || !candidate.url) {
+      continue;
+    }
+
+    if (new URL(candidate.url).origin !== "https://www.youtube.com") {
+      continue;
+    }
+
+    if (candidate.status !== "complete") {
+      console.warn(`The tab ${candidate.title} is not completely loaded`);
+      continue;
+    }
+
+    const setActiveTabMessage: SetActiveTabMessage = {
+      type: MessageTypes.SetActiveTab,
+      tabId: candidate.id
+    };
+    processRuntimeMessage(
+      setActiveTabMessage,
+      {},
+      () => {}
+    );
+    return;
+  }
+
+  throw Error("There were no candidate tabs to be set as active tabs.");
+}
+
+function main() {
+  browser.runtime.onMessage.addListener(processRuntimeMessage);
+
+  serviceState.user.uuid = "test-uuid";
+  serviceState.user.username = "this user";
+
+  serviceState.users.push({
+    ...serviceState.user,
+    uuid: "test-mimic-uuuid",
+    username: "this user mimic",
+    followingUUID: serviceState.user.uuid
+  });
+  serviceState.user.followerUUIDs = ["test-mimic-uuid"];
+
+  (globalThis as any).backgroundSerivce = Object.freeze({
+    serviceState,
+    processRuntimeMessage,
+    setCurrentTabAsActiveTab,
+    getAllTabs: () => browser.tabs.query({})
+  });
+}
+
+main();
