@@ -283,6 +283,7 @@ export interface User {
   hostingOptions: UserHostingOptions,
   followingOptions: UserFollowingOptions,
   reconnectToServerOnLoss: boolean,
+  connectionQuality: ConnectionQuality | null,
   videoInfo: VideoInfo | null,
   followingUUID: string | null,
   followerUUIDs: Array<string>
@@ -321,6 +322,14 @@ export function isUser(object: any | null | undefined): object is User {
     return false;
   }
 
+  if (object.connectionQuality === undefined) {
+    return false;
+  }
+
+  if (object.connectionQuality !== null && !isEnumValue(ConnectionQuality, object.connectionQuality)) {
+    return false;
+  }
+
   if (object.videoInfo !== null) {
     if (!isVideoInfo(object.videoInfo)) {
       return false;
@@ -348,6 +357,7 @@ export const userDefaults: Readonly<User> = Object.freeze({
   hostingOptions: userHostingOptionsDefaults,
   followingOptions: userFollowingOptionsDefaults,
   reconnectToServerOnLoss: true,
+  connectionQuality: null,
   videoInfo: null,
   followingUUID: null,
   followerUUIDs: []
