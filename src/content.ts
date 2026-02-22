@@ -1,6 +1,18 @@
-import { ErrorMessageReceived }  from "./errors";
 import browser = chrome;
-import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PlaybackState, VideoInfo, wellDefinedMessage } from "./types";
+import { ErrorMessageReceived }  from "./errors";
+import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+
+const moduleState: {
+  isActiveTab: () => boolean,
+  videoInfoCache: VideoInfo | null
+  backgroundServicePort: browser.runtime.Port | null,
+  packagedServiceState: PackagedServiceState | null
+} = {
+  isActiveTab: () => moduleState.backgroundServicePort !== null,
+  videoInfoCache: null,
+  backgroundServicePort: null,
+  packagedServiceState: null
+};
 
 function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) => boolean): HTMLElement | null {
   const parent = elementNode.parentNode;
@@ -159,8 +171,50 @@ function waitForMetadata(): Promise<VideoInfo> {
   });
 }
 
-let video = document.querySelector("video");
+function sendVideoInfo() {
+  if (!moduleState.isActiveTab() || moduleState.videoInfoCache === null || moduleState.backgroundServicePort == null) {
+    return;
+  }
+
+  const videoInfoMessage: VideoInfoMessage = {
+    type: MessageTypes.VideoInfo,
+    videoInfo: moduleState.videoInfoCache
+  };
+  moduleState.backgroundServicePort.postMessage(videoInfoMessage);
+}
+
+function getStateAndSend(evt: Event) {
+  if (moduleState.videoInfoCache === null) {
+    return;
+  }
+
+  const video = evt.target as HTMLVideoElement;
+
+  moduleState.videoInfoCache.playbackInfo.state = videoPlaybackState(video);
+  moduleState.videoInfoCache.playbackInfo.currentTime = video.currentTime;
+  moduleState.videoInfoCache.playbackInfo.playbackRate = video.playbackRate;
+  sendVideoInfo();
+}
+
+function registerVideoElementEvents(video: HTMLVideoElement): void {
+  video.addEventListener("playing", getStateAndSend);
+  video.addEventListener("pause", getStateAndSend);
+  video.addEventListener("waiting", getStateAndSend);
+  video.addEventListener("ratechange", getStateAndSend);
+  video.addEventListener("timeupdate", getStateAndSend);
+}
+
+function removeVideoElementEvents(video: HTMLVideoElement): void {
+  video.removeEventListener("playing", getStateAndSend);
+  video.removeEventListener("pause", getStateAndSend);
+  video.removeEventListener("waiting", getStateAndSend);
+  video.removeEventListener("ratechange", getStateAndSend);
+  video.removeEventListener("timeupdate", getStateAndSend);
+}
+
 function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => void) {
+  let video = document.querySelector("video");
+
   const expandPlayerKeyboardEvent = new KeyboardEvent("keydown", {
     key: "i",
     code: "KeyI",
@@ -202,6 +256,36 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
   });
 }
 
+function processPortMessage(
+  message: Message,
+  port: browser.runtime.Port
+): void {
+  if (!isGenericMessage(message)) {
+    throw new Error("Recieved unknown message");
+  }
+
+  switch (message.type) {
+    case MessageTypes.Error: {
+      throw new ErrorMessageReceived(
+        wellDefinedMessage(
+          isErrorMessage,
+          MessageTypes.Error,
+          message
+        )
+      );
+    }
+    default: {
+      console.group("Dropped message:");
+      console.warn("Port:");
+      console.warn(port);
+      console.warn("Message:");
+      console.warn(message);
+      console.groupEnd();
+      return;
+    }
+  }
+}
+
 function processRuntimeMessage(
   message: Message,
   sender: browser.runtime.MessageSender,
@@ -234,7 +318,32 @@ function processRuntimeMessage(
 }
 
 function main() {
-  detectVideoInfo(videoInfo => console.log(videoInfo));
+  detectVideoInfo(videoInfo => {
+    moduleState.videoInfoCache = videoInfo;
+    sendVideoInfo();
+    console.log(videoInfo)
+  });
+
+  browser.runtime.onMessage.addListener(processRuntimeMessage);
+  browser.runtime.onConnect.addListener(port => {
+    if (port.name !== "active-tab") {
+      throw Error(`Received unknown port connect request: ${port.name}`);
+    }
+    port.onMessage.addListener(processPortMessage);
+    moduleState.backgroundServicePort = port;
+    waitForVideoElement().then(video => registerVideoElementEvents(video));
+    console.log("Is active YouTube Sync tab.");
+    port.onDisconnect.addListener(() => {
+      waitForVideoElement().then(video => removeVideoElementEvents(video));
+      moduleState.backgroundServicePort = null;
+      console.log("Is no longer active YouTube Sync tab.");
+    });
+  });
 }
 
-(globalThis as any).contentMain = main;
+(globalThis as any).contentModule = Object.freeze({
+  moduleState,
+  processRuntimeMessage,
+  processPortMessage,
+  main
+});

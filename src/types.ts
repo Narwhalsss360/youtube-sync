@@ -340,7 +340,10 @@ export function wellDefined<T>(object: T | null | undefined, error: Error): T {
 export enum MessageTypes {
   Error = "message",
   RequestPackagedServiceState = "request-packaged-service-state",
-  PackagedServiceState = "packaged-service-state"
+  PackagedServiceState = "packaged-service-state",
+  VideoInfo = "video-info",
+  SetActiveTab = "set-active-tab",
+  Acknowledge = "acknowledge"
 };
 
 export interface GenericMessage {
@@ -426,7 +429,91 @@ export function isPackagedServiceStateMessage(object: any | null | undefined): o
   return true;
 }
 
-export function wellDefinedMessage<T>(
+export interface VideoInfoMessage {
+  type: MessageTypes.VideoInfo,
+  videoInfo: VideoInfo
+};
+
+export function isVideoInfoMessage(object: any | null | undefined): object is VideoInfoMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.VideoInfo) {
+    return false;
+  }
+
+  if (!isVideoInfo(object.videoInfo)) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface SetActiveTabMessage {
+  type: MessageTypes.SetActiveTab,
+  tabId: number | null
+};
+
+export function isSetActiveTabMessage(object: any | null | undefined): object is SetActiveTabMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.SetActiveTab) {
+    return false;
+  }
+
+  if (typeof object.tabId === "number") {
+    if (object.tabId <= 0) {
+      return false;
+    }
+  } else if (object !== null) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface AcknowledgeMessage {
+  type: MessageTypes.Acknowledge
+};
+
+export function isAcknowledgeMessage(object: any | null | undefined): object is AcknowledgeMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Acknowledge) {
+    return false;
+  }
+
+  return true;
+}
+
+export type Message = (
+  GenericMessage |
+  ErrorMessage |
+  RequestPackagedServiceStateMessage |
+  PackagedServiceStateMessage |
+  VideoInfoMessage |
+  SetActiveTabMessage |
+  AcknowledgeMessage
+);
+
+export function wellDefinedMessage<T extends Message>(
   typeChecker: (object: any | null | undefined) => object is T,
   expectedMessageType: MessageTypes,
   object: GenericMessage | null | undefined,
@@ -459,10 +546,3 @@ export function wellDefinedMessage<T>(
 
   return object
 }
-
-export type Message = (
-  GenericMessage |
-  ErrorMessage |
-  RequestPackagedServiceStateMessage |
-  PackagedServiceStateMessage
-);
