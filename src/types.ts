@@ -29,7 +29,28 @@ export interface ComparersDefinitions {
   [key: string]: (a: any, b: any) => boolean
 };
 
-export function arrayEquals(a: Array<any>, b: Array<any>, compare: undefined | ((a: any, b: any) => boolean) = undefined): boolean {
+export function arrayEquals(a: Array<any> | null | undefined, b: Array<any> | null | undefined, compare: undefined | ((a: any, b: any) => boolean) = undefined): boolean {
+  if (a === undefined && b !== undefined) {
+    return false;
+  }
+  if (a !== undefined && b === undefined) {
+    return false;
+  }
+
+  if (a === null && b !== null) {
+    return false;
+  }
+  if (a !== null && b === null) {
+    return false;
+  }
+
+  if (a === null || a === undefined) {
+    return false;
+  }
+  if (b === null || b === undefined) {
+    return false;
+  }
+
   if (a.length !== b.length) {
     return false;
   }
@@ -161,9 +182,9 @@ export function isVideoInfo(object: any | null | undefined): object is VideoInfo
   return true;
 }
 
-export function detectVideoInfoUpdates(videoInfo: VideoInfo | undefined, newVideoInfo: VideoInfo): Array<keyof VideoInfo> {
-  if (videoInfo === undefined) {
-    return Object.keys(newVideoInfo) as Array<keyof VideoInfo>;
+export function detectVideoInfoUpdates(videoInfo: VideoInfo | null | undefined, newVideoInfo: VideoInfo | null): Array<keyof VideoInfo> {
+  if (videoInfo === undefined || videoInfo === null || newVideoInfo === null) {
+    return ["videoId", "title", "channel", "channelImageUrl", "duration", "playbackInfo"];
   }
 
   const comparers: ComparersDefinitions = {
@@ -263,7 +284,8 @@ export interface User {
   followingOptions: UserFollowingOptions,
   reconnectToServerOnLoss: boolean,
   videoInfo: VideoInfo | null,
-  followingUUID: string | null
+  followingUUID: string | null,
+  followerUUIDs: Array<string>
 };
 
 export function isUser(object: any | null | undefined): object is User {
@@ -313,6 +335,10 @@ export function isUser(object: any | null | undefined): object is User {
     return false;
   }
 
+  if (!Array.isArray(object.followerUUIDs)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -323,7 +349,8 @@ export const userDefaults: Readonly<User> = Object.freeze({
   followingOptions: userFollowingOptionsDefaults,
   reconnectToServerOnLoss: true,
   videoInfo: null,
-  followingUUID: null
+  followingUUID: null,
+  followerUUIDs: []
 });
 
 export function detectUserUpdate(user: User | undefined, newUser: User): Array<keyof User> {
@@ -334,7 +361,8 @@ export function detectUserUpdate(user: User | undefined, newUser: User): Array<k
   const comparers: ComparersDefinitions = {
     hostingOptions: (a: UserHostingOptions, b: UserHostingOptions) => detectUserHostingOptionsUpdates(a, b).length === 0,
     followingOptions: (a: UserFollowingOptions, b: UserFollowingOptions) => detectUserFollowingOptionsUpdates(a, b).length === 0,
-    videoInfo: (a: VideoInfo, b: VideoInfo) => detectVideoInfoUpdates(a, b).length === 0
+    videoInfo: (a: VideoInfo, b: VideoInfo) => detectVideoInfoUpdates(a, b).length === 0,
+    followerUUIDs: arrayEquals
   };
 
   return Object.keys(newUser)
