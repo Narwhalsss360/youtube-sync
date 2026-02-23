@@ -126,6 +126,10 @@ function waitForMetadata(): Promise<VideoInfo> {
         return;
       }
 
+      if (Number.isNaN(videoElement.duration)) {
+        return;
+      }
+
       disconnector.disconnect();
       const videoId = new URLSearchParams(document.location.search).get("v");
       if (videoId === null) {
@@ -190,7 +194,6 @@ function getStateAndSend(evt: Event) {
   }
 
   const video = evt.target as HTMLVideoElement;
-
   moduleState.videoInfoCache.playbackInfo.state = videoPlaybackState(video);
   moduleState.videoInfoCache.playbackInfo.currentTime = video.currentTime;
   moduleState.videoInfoCache.playbackInfo.playbackRate = video.playbackRate;
