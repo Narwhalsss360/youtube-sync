@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, PortAvailableMessage, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
@@ -352,6 +352,11 @@ function main() {
       console.log("Is no longer active YouTube Sync tab.");
     });
   });
+
+  const portAvailableMessage: PortAvailableMessage = {
+    type: MessageTypes.PortAvailable
+  };
+  browser.runtime.sendMessage(portAvailableMessage);
 
   (globalThis as any).contentModule = Object.freeze({
     moduleState,

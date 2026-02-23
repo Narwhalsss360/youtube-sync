@@ -469,7 +469,8 @@ export enum MessageTypes {
   ServerHandshakeRequest = "server-handshake-request",
   ServerHandshake = "server-handshake",
   User = "user",
-  UserDisconnect = "user-disconnect"
+  UserDisconnect = "user-disconnect",
+  PortAvailable = "port-available"
 };
 
 export interface GenericMessage {
@@ -787,6 +788,26 @@ export function isUserDisconnectMessage(object: any | null | undefined): object 
   return true;
 };
 
+export interface PortAvailableMessage {
+  type: MessageTypes.PortAvailable
+};
+
+export function isPortAvailableMessage(object: any | null | undefined): object is PortAvailableMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.PortAvailable) {
+    return false;
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -799,7 +820,8 @@ export type Message = (
   ServerHandshakeRequestMessage |
   ServerHandshakeMessage |
   UserMessage |
-  UserDisconnectMessage
+  UserDisconnectMessage |
+  PortAvailableMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

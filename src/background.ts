@@ -26,7 +26,8 @@ import {
   isUserMessage,
   UserDisconnectMessage,
   isUserDisconnectMessage,
-  detectUserUpdates
+  detectUserUpdates,
+  isPortAvailableMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -38,13 +39,15 @@ const serviceState: {
   users: Array<User>,
   activeTab: browser.tabs.Tab | null,
   activeTabPort: browser.runtime.Port | null,
-  serverConnection: WebSocket | null
+  serverConnection: WebSocket | null,
+  reconnectToTab: number | null
 } = {
   user: structuredClone(userDefaults),
   users: [],
   activeTab: null,
   activeTabPort: null,
-  serverConnection: null
+  serverConnection: null,
+  reconnectToTab: null
 };
 
 function getTabId(tab: browser.tabs.Tab): number {
@@ -367,13 +370,39 @@ function processRuntimeMessage(
           return;
         }
 
+        serviceState.reconnectToTab = null;
         serviceState.activeTab = tab;
         serviceState.activeTabPort = browser.tabs.connect(getTabId(tab), { name: "active-tab" });
         serviceState.activeTabPort.onMessage.addListener(processActiveTabMessage);
         serviceState.activeTabPort.onDisconnect.addListener(() => {
+          browser.tabs.get(getTabId(tab)).then(tab => {
+            if (tab.url === undefined) {
+              return;
+            }
+
+            if (new URL(tab.url).origin !== "https://www.youtube.com") {
+              console.log("Active tab closed");
+              return;
+            }
+
+            console.log("Will reconnect to tab soon...");
+            serviceState.reconnectToTab = getTabId(tab);
+            const TIMEOUT = 30 * 1000;
+            const timeoutIntervalId = setInterval(() => {
+              clearInterval(timeoutIntervalId);
+              if (serviceState.reconnectToTab === null) {
+                return;
+              }
+              serviceState.reconnectToTab = null;
+              console.error("Did not reconnect to tab, timed out.");
+            }, TIMEOUT);
+          }).catch(err => {
+            console.log(`Active tab closed: ${err}`);
+          });
           serviceState.activeTab = null;
           serviceState.activeTabPort = null;
           serviceState.user.videoInfo = null;
+          broadcastPackagedStateToRuntime();
         });
       })();
     }
@@ -451,6 +480,31 @@ function processRuntimeMessage(
         cleanupServerConnection();
       });
 
+      break;
+    }
+    case MessageTypes.PortAvailable: {
+      wellDefinedMessage(isPortAvailableMessage, MessageTypes.PortAvailable, message);
+      if (serviceState.reconnectToTab === null) {
+        return;
+      }
+
+      if (sender.tab === undefined) {
+        console.warn(`The following console warning message is a sender which is not a tab that presented as a tab with a port available:`);
+        console.warn(sender);
+        return;
+      }
+
+      if (sender.tab.id !== serviceState.reconnectToTab) {
+        return;
+      }
+
+      const setActiveTabMessage: SetActiveTabMessage = {
+        type: MessageTypes.SetActiveTab,
+        tabId: serviceState.reconnectToTab
+      };
+      serviceState.reconnectToTab = null;
+      console.log(`Reconnecting to tab...`);
+      processRuntimeMessage(setActiveTabMessage, sender, sendResponse);
       break;
     }
     default: {
