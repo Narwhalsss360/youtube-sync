@@ -363,7 +363,7 @@ export const userDefaults: Readonly<User> = Object.freeze({
   followerUUIDs: []
 });
 
-export function detectUserUpdate(user: User | undefined, newUser: User): Array<keyof User> {
+export function detectUserUpdates(user: User | undefined, newUser: User): Array<keyof User> {
   if (user === undefined) {
     return Object.keys(newUser) as Array<keyof User>;
   }

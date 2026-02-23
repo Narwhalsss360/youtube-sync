@@ -1,6 +1,6 @@
 import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
-import { arrayEquals, asType, detectUserUpdate, detectVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
+import { arrayEquals, asType, detectUserUpdates, detectVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
 
 const badDOMError = Error("Bad DOM.");
 
@@ -199,7 +199,7 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
     badDOMError
   );
 
-  const updates = detectUserUpdate(previousUserData, user);
+  const updates = detectUserUpdates(previousUserData, user);
 
   if (updates.includes("username")) {
     wellDefined<HTMLDivElement>(
