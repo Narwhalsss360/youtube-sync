@@ -30,10 +30,10 @@ function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) 
 
 function videoPlaybackState(video: HTMLVideoElement): PlaybackState {
   if (video.readyState <= 2) {
-    PlaybackState.Waiting;
+    return PlaybackState.Waiting;
   }
 
-  return video.currentTime > 0 && !video.paused, !video.ended ?
+  return video.currentTime > 0 && !video.paused && !video.ended ?
     PlaybackState.Playing :
     PlaybackState.Paused;
 }
