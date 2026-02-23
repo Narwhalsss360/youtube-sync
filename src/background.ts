@@ -27,7 +27,8 @@ import {
   UserDisconnectMessage,
   isUserDisconnectMessage,
   detectUserUpdates,
-  isPortAvailableMessage
+  isPortAvailableMessage,
+  isUsersMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -77,6 +78,39 @@ function broadcastPackagedStateToRuntime(requireReceiver: boolean = false): Pack
     }
   });
   return packagedServiceStateMessage;
+}
+
+function processSelfUpdateFromServer(user: User): void {
+  if (user.uuid !== serviceState.user.uuid) {
+    throw new Error("This function is only valid for self");
+  }
+
+  if (serviceState.serverConnection?.readyState !== WebSocket.OPEN) {
+    throw new Error("This function requires a connection to the server.");
+  }
+
+  const updates = detectUserUpdates(serviceState.user, user);
+  if (updates.find(update => [
+      "uuid",
+      "username",
+      "hostingOptions",
+      "followingOptions",
+      "reconnectToServerOnLoss",
+      "videoInfo"
+    ].includes(update))
+  ) {
+    console.error(`Received self user update from server which is not allowed. Updates from server: ${updates.join(", ")}`);
+    const errorMessage: ErrorMessage = {
+      type: MessageTypes.Error,
+      message: "Received self user update from server which is not allowed.",
+      sender: `${serviceState.user.uuid}: Background Service Worker`
+    };
+    serviceState.serverConnection.send(JSON.stringify(errorMessage));
+    return;
+  }
+
+  serviceState.user = user;
+  serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
 }
 
 function notifyServerOfVideoInfo() {
@@ -163,29 +197,9 @@ function processServerMessage(message: Message) {
         message
       );
 
-      if (userMessage.user.uuid === serviceState.user.uuid) {
-        const updates = detectUserUpdates(serviceState.user, userMessage.user);
-        if (updates.find(update => [
-            "uuid",
-            "username",
-            "hostingOptions",
-            "followingOptions",
-            "reconnectToServerOnLoss",
-            "videoInfo"
-          ].includes(update))
-        ) {
-          console.error(`Received self user update from server which is not allowed. Updates from server: ${updates.join(", ")}`);
-          const errorMessage: ErrorMessage = {
-            type: MessageTypes.Error,
-            message: "Received self user update from server which is not allowed.",
-            sender: `${serviceState.user.uuid}: Background Service Worker`
-          };
-          serviceState.serverConnection.send(JSON.stringify(errorMessage));
-          break;
-        }
 
-        serviceState.user = userMessage.user;
-        serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
+      if (serviceState.user.uuid === userMessage.user.uuid) {
+        processSelfUpdateFromServer(userMessage.user);
       } else {
         const existingIndex = serviceState.users.findIndex(user => user.uuid === userMessage.user.uuid);
         if (existingIndex === -1) {
@@ -259,6 +273,23 @@ function processServerMessage(message: Message) {
       serviceState.users = serviceState.users.filter(user => user.uuid !== userDisconnectMessage.uuid);
       const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
       serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.Users: {
+      const usersMessage = wellDefinedMessage(
+        isUsersMessage,
+        MessageTypes.Users,
+        message
+      );
+
+      serviceState.users = [];
+      for (const user of usersMessage.users) {
+        if (user.uuid === serviceState.user.uuid) {
+          processSelfUpdateFromServer(user);
+        } else {
+          serviceState.users.push(user);
+        }
+      }
       break;
     }
     default: {

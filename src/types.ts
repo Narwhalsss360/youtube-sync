@@ -470,7 +470,8 @@ export enum MessageTypes {
   ServerHandshake = "server-handshake",
   User = "user",
   UserDisconnect = "user-disconnect",
-  PortAvailable = "port-available"
+  PortAvailable = "port-available",
+  Users = "users"
 };
 
 export interface GenericMessage {
@@ -808,6 +809,37 @@ export function isPortAvailableMessage(object: any | null | undefined): object i
   return true;
 }
 
+export interface UsersMessage {
+  type: MessageTypes.Users,
+  users: Array<User>
+};
+
+export function isUsersMessage(object: any | null | undefined): object is UsersMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Users) {
+    return false;
+  }
+
+  if (!Array.isArray(object.users)) {
+    return false;
+  }
+
+  for (const user of object.users) {
+    if (!isUser(user)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -821,7 +853,8 @@ export type Message = (
   ServerHandshakeMessage |
   UserMessage |
   UserDisconnectMessage |
-  PortAvailableMessage
+  PortAvailableMessage |
+  UsersMessage
 );
 
 export function wellDefinedMessage<T extends Message>(
