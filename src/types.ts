@@ -464,7 +464,12 @@ export enum MessageTypes {
   PackagedServiceState = "packaged-service-state",
   VideoInfo = "video-info",
   SetActiveTab = "set-active-tab",
-  Acknowledge = "acknowledge"
+  Acknowledge = "acknowledge",
+  ConnectToServerAs = "connect-to-server-as",
+  ServerHandshakeRequest = "server-handshake-request",
+  ServerHandshake = "server-handshake",
+  User = "user",
+  UserDisconnect = "user-disconnect"
 };
 
 export interface GenericMessage {
@@ -552,7 +557,8 @@ export function isPackagedServiceStateMessage(object: any | null | undefined): o
 
 export interface VideoInfoMessage {
   type: MessageTypes.VideoInfo,
-  videoInfo: VideoInfo
+  videoInfo: VideoInfo | null
+  uuid: string | null
 };
 
 export function isVideoInfoMessage(object: any | null | undefined): object is VideoInfoMessage {
@@ -624,6 +630,163 @@ export function isAcknowledgeMessage(object: any | null | undefined): object is 
   return true;
 }
 
+export interface ConnectToServerAsMessage {
+  type: MessageTypes.ConnectToServerAs,
+  username: string,
+  url: string
+};
+
+export function isConnectToServerAsMessage(object: any | null | undefined): object is ConnectToServerAsMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.ConnectToServerAs) {
+    return false;
+  }
+
+  if (typeof object.username !== "string") {
+    return false;
+  }
+
+  if (object.username.length === 0) {
+    return false;
+  }
+
+  if (typeof object.url !== "string") {
+    return false;
+  }
+
+  if (object.url.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface ServerHandshakeRequestMessage {
+  type: MessageTypes.ServerHandshakeRequest,
+  user: User
+}
+
+export function isServerHandshakeRequestMessage(object: any | null | undefined): object is ServerHandshakeRequestMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.ServerHandshakeRequest) {
+    return false;
+  }
+
+  if (!isUser(object.user)) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface ServerHandshakeMessage {
+  type: MessageTypes.ServerHandshake,
+  uuid: string
+  users: Array<User>
+};
+
+export function isServerHandshakeMessage(object: any | null | undefined): object is ServerHandshakeMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.ServerHandshake) {
+    return false;
+  }
+
+  if (typeof object.uuid !== "string") {
+    return false;
+  }
+
+  if (object.uuid.length === 0) {
+    return false;
+  }
+
+  if (!Array.isArray(object.users)) {
+    return false;
+  }
+
+  for (const user of object.users) {
+    if (!isUser(user)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export interface UserMessage {
+  type: MessageTypes.User,
+  user: User
+};
+
+export function isUserMessage(object: any | null | undefined): object is UserMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.User) {
+    return false;
+  }
+
+  if (!isUser(object.user)) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface UserDisconnectMessage {
+  type: MessageTypes.UserDisconnect,
+  uuid: string
+};
+
+export function isUserDisconnectMessage(object: any | null | undefined): object is UserDisconnectMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.UserDisconnect) {
+    return false;
+  }
+
+  if (typeof object.uuid !== "string") {
+    return false;
+  }
+
+  if (object.uuid.length === 0) {
+    return false;
+  }
+
+  return true;
+};
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -631,7 +794,12 @@ export type Message = (
   PackagedServiceStateMessage |
   VideoInfoMessage |
   SetActiveTabMessage |
-  AcknowledgeMessage
+  AcknowledgeMessage |
+  ConnectToServerAsMessage |
+  ServerHandshakeRequestMessage |
+  ServerHandshakeMessage |
+  UserMessage |
+  UserDisconnectMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

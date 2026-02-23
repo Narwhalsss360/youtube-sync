@@ -178,7 +178,8 @@ function sendVideoInfo() {
 
   const videoInfoMessage: VideoInfoMessage = {
     type: MessageTypes.VideoInfo,
-    videoInfo: moduleState.videoInfoCache
+    videoInfo: moduleState.videoInfoCache,
+    uuid: null
   };
   moduleState.backgroundServicePort.postMessage(videoInfoMessage);
 }
