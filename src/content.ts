@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
@@ -277,6 +277,14 @@ function processPortMessage(
           message
         )
       );
+    }
+    case MessageTypes.PackagedServiceState: {
+      moduleState.packagedServiceState = wellDefinedMessage(
+        isPackagedServiceStateMessage,
+        MessageTypes.PackagedServiceState,
+        message
+      ).packagedServiceState;
+      break;
     }
     default: {
       console.group("Dropped message:");
