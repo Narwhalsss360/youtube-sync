@@ -249,7 +249,7 @@ function processServerMessage(message: Message) {
         message
       );
 
-      if (userDisconnectMessage.uuid !== serviceState.user.uuid) {
+      if (userDisconnectMessage.uuid === serviceState.user.uuid) {
         throw new Error("User disconnect message for self is undefined.");
       }
 
