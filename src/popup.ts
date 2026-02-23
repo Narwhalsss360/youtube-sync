@@ -1,6 +1,6 @@
 import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
-import { arrayEquals, asType, detectUserUpdates, detectVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
+import { asType, detectUserUpdates, detectVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
 
 const badDOMError = Error("Bad DOM.");
 
@@ -56,6 +56,19 @@ function getUserUUIDForDiv(div: HTMLDivElement): string {
     throw new Error("This div element is not associated with user uuid");
   }
   return uuid;
+}
+
+function getPlaybackStateIcon(state: PlaybackState): string {
+  switch (state) {
+    case PlaybackState.Playing:
+      return "&#9654;";
+    case PlaybackState.Paused:
+      return "&#9208;";
+    case PlaybackState.Waiting:
+      return "&#11119;";
+    default:
+      throw Error(`Invalid state ${state}`);
+  }
 }
 
 function constructVideoInfoInnerHTML(user: User): string {
@@ -121,7 +134,7 @@ function constructUserTimestampsInnerHTML(user: User): string {
   }
 
   return (
-    `<div id="${userElementIdPrefix(user.uuid, "timestamp")}">${secondsToTimestamp(user.videoInfo.playbackInfo.currentTime)}/${secondsToTimestamp(user.videoInfo.duration)} @ ${Math.round(user.videoInfo.playbackInfo.playbackRate * 1000) / 1000}x</div>`
+    `<div id="${userElementIdPrefix(user.uuid, "timestamp")}">${getPlaybackStateIcon(user.videoInfo.playbackInfo.state)} ${secondsToTimestamp(user.videoInfo.playbackInfo.currentTime)}/${secondsToTimestamp(user.videoInfo.duration)} @ ${Math.round(user.videoInfo.playbackInfo.playbackRate * 1000) / 1000}x</div>`
   )
 }
 
