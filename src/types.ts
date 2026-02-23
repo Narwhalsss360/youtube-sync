@@ -184,6 +184,9 @@ export function isVideoInfo(object: any | null | undefined): object is VideoInfo
 
 export function detectVideoInfoUpdates(videoInfo: VideoInfo | null | undefined, newVideoInfo: VideoInfo | null): Array<keyof VideoInfo> {
   if (videoInfo === undefined || videoInfo === null || newVideoInfo === null) {
+    if (videoInfo === newVideoInfo) {
+      return [];
+    }
     return ["videoId", "title", "channel", "channelImageUrl", "duration", "playbackInfo"];
   }
 
@@ -383,7 +386,8 @@ export interface PackagedServiceState {
   user: User,
   users: Array<User>,
   activeTabId: number | null,
-  serverAddress: string | null
+  serverAddress: string | null,
+  pendingServerRequests: Array<GenericMessage>
 };
 
 export function isPackagedServiceState(object: any | null | undefined): object is PackagedServiceState {
@@ -423,6 +427,16 @@ export function isPackagedServiceState(object: any | null | undefined): object i
     }
   } else if (object.serverAddress !== null) {
     return false;
+  }
+
+  if (!Array.isArray(object.pendingServerRequests)) {
+    return false;
+  }
+
+  for (const pending of object.pendingServerRequests) {
+    if (!isGenericMessage(pending)) {
+      return false;
+    }
   }
 
   return true;
@@ -471,11 +485,15 @@ export enum MessageTypes {
   User = "user",
   UserDisconnect = "user-disconnect",
   PortAvailable = "port-available",
-  Users = "users"
+  Users = "users",
+  Follow = "follow",
+  StopFollowing = "stop-following",
+  Pending = "pending"
 };
 
 export interface GenericMessage {
-  type: string
+  type: MessageTypes
+  [key: string]: any | null
 };
 
 export function isGenericMessage(object: any | null | undefined): object is GenericMessage {
@@ -487,18 +505,14 @@ export function isGenericMessage(object: any | null | undefined): object is Gene
     return false;
   }
 
-  if (typeof object.type !== "string") {
-    return false;
-  }
-
-  if (object.type.length === 0) {
+  if (!isEnumValue<MessageTypes>(MessageTypes, object.type)) {
     return false;
   }
 
   return true;
 }
 
-export interface ErrorMessage {
+export interface ErrorMessage extends GenericMessage {
   type: MessageTypes.Error,
   message: string,
   sender: string
@@ -528,11 +542,11 @@ export function isErrorMessage(object: any | null | undefined): object is ErrorM
   return true;
 }
 
-export interface RequestPackagedServiceStateMessage {
+export interface RequestPackagedServiceStateMessage extends GenericMessage {
   type: MessageTypes.RequestPackagedServiceState
 };
 
-export interface PackagedServiceStateMessage {
+export interface PackagedServiceStateMessage extends GenericMessage {
   type: MessageTypes.PackagedServiceState,
   packagedServiceState: PackagedServiceState
 };
@@ -557,7 +571,7 @@ export function isPackagedServiceStateMessage(object: any | null | undefined): o
   return true;
 }
 
-export interface VideoInfoMessage {
+export interface VideoInfoMessage extends GenericMessage {
   type: MessageTypes.VideoInfo,
   videoInfo: VideoInfo | null
   uuid: string | null
@@ -583,7 +597,7 @@ export function isVideoInfoMessage(object: any | null | undefined): object is Vi
   return true;
 }
 
-export interface SetActiveTabMessage {
+export interface SetActiveTabMessage extends GenericMessage {
   type: MessageTypes.SetActiveTab,
   tabId: number | null
 };
@@ -612,7 +626,7 @@ export function isSetActiveTabMessage(object: any | null | undefined): object is
   return true;
 }
 
-export interface AcknowledgeMessage {
+export interface AcknowledgeMessage extends GenericMessage {
   type: MessageTypes.Acknowledge
 };
 
@@ -632,7 +646,7 @@ export function isAcknowledgeMessage(object: any | null | undefined): object is 
   return true;
 }
 
-export interface ConnectToServerAsMessage {
+export interface ConnectToServerAsMessage extends GenericMessage {
   type: MessageTypes.ConnectToServerAs,
   username: string,
   url: string
@@ -670,7 +684,7 @@ export function isConnectToServerAsMessage(object: any | null | undefined): obje
   return true;
 }
 
-export interface ServerHandshakeRequestMessage {
+export interface ServerHandshakeRequestMessage extends GenericMessage {
   type: MessageTypes.ServerHandshakeRequest,
   user: User
 }
@@ -695,7 +709,7 @@ export function isServerHandshakeRequestMessage(object: any | null | undefined):
   return true;
 }
 
-export interface ServerHandshakeMessage {
+export interface ServerHandshakeMessage extends GenericMessage {
   type: MessageTypes.ServerHandshake,
   uuid: string
   users: Array<User>
@@ -735,7 +749,7 @@ export function isServerHandshakeMessage(object: any | null | undefined): object
   return true;
 }
 
-export interface UserMessage {
+export interface UserMessage extends GenericMessage {
   type: MessageTypes.User,
   user: User
 };
@@ -760,7 +774,7 @@ export function isUserMessage(object: any | null | undefined): object is UserMes
   return true;
 }
 
-export interface UserDisconnectMessage {
+export interface UserDisconnectMessage extends GenericMessage {
   type: MessageTypes.UserDisconnect,
   uuid: string
 };
@@ -789,7 +803,7 @@ export function isUserDisconnectMessage(object: any | null | undefined): object 
   return true;
 };
 
-export interface PortAvailableMessage {
+export interface PortAvailableMessage extends GenericMessage {
   type: MessageTypes.PortAvailable
 };
 
@@ -809,7 +823,7 @@ export function isPortAvailableMessage(object: any | null | undefined): object i
   return true;
 }
 
-export interface UsersMessage {
+export interface UsersMessage extends GenericMessage {
   type: MessageTypes.Users,
   users: Array<User>
 };
@@ -840,6 +854,85 @@ export function isUsersMessage(object: any | null | undefined): object is UsersM
   return true;
 }
 
+export interface FollowMessage extends GenericMessage {
+  type: MessageTypes.Follow,
+  followingUUID: string
+};
+
+export function isFollowMessage(object: any | null | undefined): object is FollowMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Follow) {
+    return false;
+  }
+
+  if (typeof object.followingUUID !== "string") {
+    return false;
+  }
+
+  if (object.followingUUID.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface StopFollowingMessage extends GenericMessage {
+  type: MessageTypes.StopFollowing,
+  followingUUID: string
+};
+
+export function isStopFollowingMessage(object: any | null | undefined): object is StopFollowingMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.StopFollowing) {
+    return false;
+  }
+
+  if (typeof object.followingUUID !== "string") {
+    return false;
+  }
+
+  if (object.followingUUID.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface PendingMessage extends GenericMessage {
+  type: MessageTypes.Pending
+};
+
+export function isPendingMessage(object: any | null | undefined): object is PendingMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Pending) {
+    return false;
+  }
+
+  return true;
+}
+
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -854,7 +947,10 @@ export type Message = (
   UserMessage |
   UserDisconnectMessage |
   PortAvailableMessage |
-  UsersMessage
+  UsersMessage |
+  FollowMessage |
+  StopFollowingMessage |
+  PendingMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

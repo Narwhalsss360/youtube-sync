@@ -28,7 +28,13 @@ import {
   isUserDisconnectMessage,
   detectUserUpdates,
   isPortAvailableMessage,
-  isUsersMessage
+  isUsersMessage,
+  FollowMessage,
+  isFollowMessage,
+  PendingMessage,
+  GenericMessage,
+  StopFollowingMessage,
+  isStopFollowingMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -41,14 +47,16 @@ const serviceState: {
   activeTab: browser.tabs.Tab | null,
   activeTabPort: browser.runtime.Port | null,
   serverConnection: WebSocket | null,
-  reconnectToTab: number | null
+  reconnectToTab: number | null,
+  pendingServerRequests: Array<GenericMessage>
 } = {
   user: structuredClone(userDefaults),
   users: [],
   activeTab: null,
   activeTabPort: null,
   serverConnection: null,
-  reconnectToTab: null
+  reconnectToTab: null,
+  pendingServerRequests: []
 };
 
 function getTabId(tab: browser.tabs.Tab): number {
@@ -63,7 +71,8 @@ function packageServiceState(): PackagedServiceState {
     user: serviceState.user,
     users: serviceState.users,
     activeTabId: serviceState.activeTab?.id ?? null,
-    serverAddress: serviceState.serverConnection?.url ?? null
+    serverAddress: serviceState.serverConnection?.url ?? null,
+    pendingServerRequests: serviceState.pendingServerRequests
   };
 }
 
@@ -90,6 +99,11 @@ function processSelfUpdateFromServer(user: User): void {
   }
 
   const updates = detectUserUpdates(serviceState.user, user);
+  const pendingFollowingChangesIndex = serviceState.pendingServerRequests.findIndex(pending => [MessageTypes.Follow, MessageTypes.StopFollowing].includes(pending.type));
+  if (pendingFollowingChangesIndex !== -1) {
+    serviceState.pendingServerRequests.splice(pendingFollowingChangesIndex, 1);
+  }
+
   if (updates.find(update => [
       "uuid",
       "username",
@@ -148,8 +162,11 @@ function cleanupServerConnection() {
   }
 
   serviceState.user.uuid = null;
+  serviceState.user.followingUUID = null;
+  serviceState.user.followerUUIDs = [];
   serviceState.users = [];
   serviceState.serverConnection = null;
+  serviceState.pendingServerRequests = [];
   broadcastPackagedStateToRuntime();
 }
 
@@ -182,6 +199,10 @@ function processServerMessage(message: Message) {
 
   switch (message.type) {
     case MessageTypes.Error: {
+      if (serviceState.pendingServerRequests.length > 0) {
+        console.error("The following pending request returned an error");
+        console.error(serviceState.pendingServerRequests.pop());
+      }
       throw new ErrorMessageReceived(
         wellDefinedMessage(
           isErrorMessage,
@@ -536,6 +557,106 @@ function processRuntimeMessage(
       serviceState.reconnectToTab = null;
       console.log(`Reconnecting to tab...`);
       processRuntimeMessage(setActiveTabMessage, sender, sendResponse);
+      break;
+    }
+    case MessageTypes.Follow: {
+      const followMessage: FollowMessage = wellDefinedMessage(
+        isFollowMessage,
+        MessageTypes.Follow,
+        message
+      );
+
+      if (serviceState.serverConnection?.readyState !== WebSocket.OPEN) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "A connection to the server is required for this request",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      if (serviceState.user.followingUUID !== null) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Already following, to switch stop following first",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      if (serviceState.user.followingUUID === serviceState.user.uuid) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Cannot follow self.",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      if (serviceState.pendingServerRequests.find(pending => [MessageTypes.Follow, MessageTypes.StopFollowing].includes(pending.type))) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Request to follow/stop following already pending.",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      serviceState.pendingServerRequests.push(followMessage);
+      serviceState.serverConnection.send(JSON.stringify(followMessage));
+      const pendingMessage: PendingMessage = {
+        type: MessageTypes.Pending
+      };
+      sendResponse(pendingMessage);
+      break;
+    }
+    case MessageTypes.StopFollowing: {
+      const stopFollowingMessage: StopFollowingMessage = wellDefinedMessage(
+        isStopFollowingMessage,
+        MessageTypes.StopFollowing,
+        message
+      );
+
+      if (serviceState.serverConnection?.readyState !== WebSocket.OPEN) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "A connection to the server is required for this request",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      if (serviceState.user.followingUUID === null) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Already not following",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      if (serviceState.pendingServerRequests.find(pending => [MessageTypes.Follow, MessageTypes.StopFollowing].includes(pending.type))) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Request to follow/stop following already pending.",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return;
+      }
+
+      serviceState.pendingServerRequests.push(stopFollowingMessage);
+      serviceState.serverConnection.send(JSON.stringify(stopFollowingMessage));
+      const pendingMessage: PendingMessage = {
+        type: MessageTypes.Pending
+      };
+      sendResponse(pendingMessage);
       break;
     }
     default: {
