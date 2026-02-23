@@ -123,6 +123,8 @@ function processSelfUpdateFromServer(user: User): void {
     return;
   }
 
+  const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+  serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
   serviceState.user = user;
   serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
 }
@@ -193,7 +195,8 @@ function processServerMessage(message: Message) {
     serviceState.user.uuid = serverHandshakeMessage.uuid;
     serviceState.users = serverHandshakeMessage.users;
     serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));;
-    broadcastPackagedStateToRuntime();
+    const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+    serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
     return;
   }
 
@@ -348,7 +351,8 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       );
       serviceState.user.videoInfo = videoInfoMessage.videoInfo;
       notifyServerOfVideoInfo();
-      broadcastPackagedStateToRuntime();
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
     }
     default: {
@@ -454,7 +458,8 @@ function processRuntimeMessage(
           serviceState.activeTab = null;
           serviceState.activeTabPort = null;
           serviceState.user.videoInfo = null;
-          broadcastPackagedStateToRuntime();
+          const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+          notifyServerOfVideoInfo();
         });
       })();
     }
@@ -606,8 +611,10 @@ function processRuntimeMessage(
         return;
       }
 
-      serviceState.pendingServerRequests.push(followMessage);
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       serviceState.serverConnection.send(JSON.stringify(followMessage));
+      serviceState.pendingServerRequests.push(followMessage);
       const pendingMessage: PendingMessage = {
         type: MessageTypes.Pending
       };
@@ -651,8 +658,10 @@ function processRuntimeMessage(
         return;
       }
 
-      serviceState.pendingServerRequests.push(stopFollowingMessage);
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       serviceState.serverConnection.send(JSON.stringify(stopFollowingMessage));
+      serviceState.pendingServerRequests.push(stopFollowingMessage);
       const pendingMessage: PendingMessage = {
         type: MessageTypes.Pending
       };
