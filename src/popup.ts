@@ -1,8 +1,64 @@
 import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
-import { asType, detectUserUpdates, detectVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
+import { asType, ConnectToServerAsMessage, detectUserUpdates, detectVideoInfoUpdates, DisconnectFromServerMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
 
 const badDOMError = Error("Bad DOM.");
+
+const activeTabToggle: HTMLButtonElement = wellDefined(
+    asType<HTMLButtonElement>(
+    (element: HTMLElement) => element instanceof HTMLButtonElement,
+    document.getElementById("active-tab-toggle")
+  ),
+  badDOMError
+);
+
+const connectAsForm: HTMLFormElement = wellDefined(
+  asType<HTMLFormElement>(
+    (element: HTMLElement) => element instanceof HTMLFormElement,
+    document.getElementById("connect-as-form")
+  ),
+  badDOMError
+);
+
+const usernameInput: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("username-input")
+  ),
+  badDOMError
+);
+
+const serverAddressInput: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("server-address-input")
+  ),
+  badDOMError
+)
+
+const connectButton: HTMLButtonElement = wellDefined(
+    asType<HTMLButtonElement>(
+    (element: HTMLElement) => element instanceof HTMLButtonElement,
+    document.getElementById("connect-button")
+  ),
+  badDOMError
+);
+
+const disconnectForm: HTMLFormElement = wellDefined(
+  asType<HTMLFormElement>(
+    (element: HTMLElement) => element instanceof HTMLFormElement,
+    document.getElementById("disconnect-form")
+  ),
+  badDOMError
+);
+
+const disconnectServerAddress: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("disconnect-server-address")
+  ),
+  badDOMError
+);
 
 const popupState : {
   usersDiv: HTMLDivElement,
@@ -25,6 +81,27 @@ const popupState : {
   },
   usersWithSelf: () => [popupState.packagedServiceState.user, ...popupState.packagedServiceState.users],
 };
+
+async function getActiveTab(): Promise<browser.tabs.Tab> {
+  return wellDefined((await browser.tabs.query({
+    currentWindow: true,
+    active: true
+  })).at(0), Error(`Bad implementation of ${getActiveTab.name}`));
+}
+
+function setHidden(element: HTMLElement, hidden: boolean): void {
+  if (hidden) {
+    element.hidden = true;
+    if (!element.classList.contains("hidden")) {
+      element.classList.add("hidden");
+    }
+  } else {
+    element.hidden = false;
+    if (element.classList.contains("hidden")) {
+      element.classList.remove("hidden");
+    }
+  }
+}
 
 function secondsToHoursMinutesAndSeconds(totalSeconds: number): [number, number, number] {
   return [
@@ -135,7 +212,7 @@ function constructUserTimestampsInnerHTML(user: User): string {
   }
 
   return (
-    `<div id="${userElementIdPrefix(user.uuid, "timestamp")}">${getPlaybackStateIcon(user.videoInfo.playbackInfo.state)} ${secondsToTimestamp(user.videoInfo.playbackInfo.currentTime)}/${secondsToTimestamp(user.videoInfo.duration)} @ ${Math.round(user.videoInfo.playbackInfo.playbackRate * 1000) / 1000}x</div>`
+    `<div id="${userElementIdPrefix(user.uuid, "timestamp")}" class="timestamps text-div">${getPlaybackStateIcon(user.videoInfo.playbackInfo.state)} ${secondsToTimestamp(user.videoInfo.playbackInfo.currentTime)}/${secondsToTimestamp(user.videoInfo.duration)} @ ${Math.round(user.videoInfo.playbackInfo.playbackRate * 1000) / 1000}x</div>`
   )
 }
 
@@ -157,7 +234,7 @@ function attachDataToUserContainer(div: HTMLDivElement, user: User): HTMLDivElem
 
   if (user.videoInfo === null) {
     div.innerHTML = String.raw
-   `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div" style="grid-column: span 2;">${user.username}</div>
+   `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div username">${user.username}</div>
     <div id="${userElementIdPrefix(user.uuid, "no-current-video")}" class="text-div no-current-video">No current video</div>`;
     return div;
   }
@@ -165,7 +242,7 @@ function attachDataToUserContainer(div: HTMLDivElement, user: User): HTMLDivElem
   const isThisUser = user.uuid === popupState.packagedServiceState.user.uuid;
 
   div.innerHTML = String.raw
- `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div" style="grid-column: span 2;">${user.username}</div>
+ `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div username">${user.username}</div>
   <div id="${userElementIdPrefix(user.uuid, "video-info")}" class="video-info">
     ${constructVideoInfoInnerHTML(user)}
   </div>
@@ -271,20 +348,54 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
 function applyState(newState: PackagedServiceState) {
   const withSelf = popupState.usersWithSelf();
   popupState.packagedServiceState = newState;
-  for (const newUserInfo of [newState.user, ...newState.users]) {
-    updateUserData(withSelf.find(user => user.uuid === newUserInfo.uuid), newUserInfo);
-  };
+  if (newState.serverAddress !== null) {
+    for (const newUserInfo of [newState.user, ...newState.users]) {
+      updateUserData(withSelf.find(user => user.uuid === newUserInfo.uuid), newUserInfo);
+    };
 
-  if (popupState.usersDiv.children.length !== 0) {
-    for (const userDivAnyElement of Array.from(popupState.usersDiv.children).slice(1)) {
-      const userDiv: HTMLDivElement = userDivAnyElement as HTMLDivElement;
-      const uuidOfDiv = getUserUUIDForDiv(userDiv);
-      if (!newState.users.find(user => user.uuid === uuidOfDiv)) {
-        userDiv.remove()
+    if (popupState.usersDiv.children.length !== 0) {
+      for (const userDivAnyElement of Array.from(popupState.usersDiv.children).slice(1)) {
+        const userDiv: HTMLDivElement = userDivAnyElement as HTMLDivElement;
+        const uuidOfDiv = getUserUUIDForDiv(userDiv);
+        if (!newState.users.find(user => user.uuid === uuidOfDiv)) {
+          userDiv.remove()
+        }
       }
     }
+  } else {
+    popupState.usersDiv.replaceChildren();
   }
 
+  getActiveTab().then(tab => {
+    if (tab.url === undefined) {
+      return;
+    }
+
+    if (new URL(tab.url).origin !== "https://www.youtube.com") {
+      return;
+    }
+
+    activeTabToggle.disabled = false;
+    if (newState.activeTabId === tab.id) {
+      activeTabToggle.value = "unset";
+      activeTabToggle.innerText = "Unset as active tab";
+    } else {
+      activeTabToggle.value = "set";
+      activeTabToggle.innerText = "Set as active tab";
+    }
+  });
+
+  if (newState.serverAddress === null) {
+    setHidden(connectAsForm, false);
+    usernameInput.disabled = false;
+    serverAddressInput.disabled = false;
+    connectButton.disabled = false;
+    setHidden(disconnectForm, true);
+  } else {
+    setHidden(connectAsForm, true)
+    setHidden(disconnectForm, false);
+    disconnectServerAddress.value = newState.serverAddress;
+  }
 }
 
 function processRuntimeMessage(
@@ -326,6 +437,71 @@ function processRuntimeMessage(
   }
 }
 
+async function activeTabToggleActivated(): Promise<void> {
+  if (activeTabToggle.value === "set") {
+    const setActiveTabMessage: SetActiveTabMessage = {
+      type: MessageTypes.SetActiveTab,
+      tabId: wellDefined((await getActiveTab()).id, Error("Expected tab to have an id"))
+    };
+    browser.runtime.sendMessage(setActiveTabMessage);
+  } else if (activeTabToggle.value === "unset") {
+    const setActiveTabMessage: SetActiveTabMessage = {
+      type: MessageTypes.SetActiveTab,
+      tabId: null
+    };
+    browser.runtime.sendMessage(setActiveTabMessage);
+  } else {
+    throw badDOMError;
+  }
+  activeTabToggle.disabled = true;
+}
+
+function connectAsFormSubmitted(evt: SubmitEvent): void {
+  evt.preventDefault();
+  usernameInput.value = usernameInput.value.trim();
+  if (usernameInput.value.length === 0) {
+    usernameInput.placeholder = "\u26A0 Username must not empty.";
+    return;
+  }
+  usernameInput.placeholder = "Username...";
+
+  serverAddressInput.value = serverAddressInput.value.trim();
+  if (serverAddressInput.value.length === 0) {
+    serverAddressInput.placeholder = "\u26A0 Server address must not empty.";
+    return;
+  }
+  serverAddressInput.placeholder = "Server address...";
+
+  try {
+    new URL(serverAddressInput.value);
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "message" in err) {
+      serverAddressInput.placeholder = `\u26A0 ${err.message}`;
+    } else {
+      serverAddressInput.placeholder = "\u26A0 Invalid URL";
+    }
+    return;
+  }
+
+  const connectToServerAsMessage: ConnectToServerAsMessage = {
+    type: MessageTypes.ConnectToServerAs,
+    username: usernameInput.value,
+    url: serverAddressInput.value
+  };
+  browser.runtime.sendMessage(connectToServerAsMessage);
+  serverAddressInput.disabled = true;
+  usernameInput.disabled = true;
+  connectButton.disabled = true;
+}
+
+function disconnectFormSubmitted(evt: SubmitEvent): void {
+  evt.preventDefault();
+  const disconnectFromServerMessage: DisconnectFromServerMessage = {
+    type: MessageTypes.DisconnectFromServer
+  };
+  browser.runtime.sendMessage(disconnectFromServerMessage);
+}
+
 async function main() {
   applyState(wellDefinedMessage(
     isPackagedServiceStateMessage,
@@ -334,6 +510,9 @@ async function main() {
   ).packagedServiceState);
 
   browser.runtime.onMessage.addListener(processRuntimeMessage);
+  activeTabToggle.addEventListener("click", activeTabToggleActivated);
+  connectAsForm.addEventListener("submit", connectAsFormSubmitted);
+  disconnectForm.addEventListener("submit", disconnectFormSubmitted);
 
   (globalThis as any).popup = {
     popupState,

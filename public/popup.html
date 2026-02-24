@@ -9,8 +9,20 @@
   <body>
     <script type="module" src="popup.js"></script>
     <div class="forms-container">
+      <button id="active-tab-toggle" disabled value="set">Set as active tab</button>
+      <form id="connect-as-form" class="connect-as-form" hidden>
+        <hr>
+        <input id="username-input" placeholder="Username..." disabled>
+        <input id="server-address-input" placeholder="Server address..." disabled>
+        <button id="connect-button" type="submit" disabled>Connect</button>
+      </form>
+      <form id="disconnect-form" class="disconnect-form" hidden>
+        <hr>
+        <input id="disconnect-server-address" disabled>
+        <button type="submit">Disconnect</button>
+      </form>
     </div>
-
+    <hr>
     <div id="users" class="users">
     </div>
   </body>
