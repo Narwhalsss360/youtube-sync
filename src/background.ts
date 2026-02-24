@@ -34,7 +34,8 @@ import {
   PendingMessage,
   GenericMessage,
   StopFollowingMessage,
-  isStopFollowingMessage
+  isStopFollowingMessage,
+  isRequestVideoInfoMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -313,6 +314,20 @@ function processServerMessage(message: Message) {
           serviceState.users.push(user);
         }
       }
+      break;
+    }
+    case MessageTypes.RequestVideoInfo: {
+      wellDefinedMessage(isRequestVideoInfoMessage, MessageTypes.RequestVideoInfo, message);
+      if (serviceState.activeTabPort === null) {
+        if (serviceState.user.videoInfo !== null) {
+          serviceState.user.videoInfo = null;
+        }
+        broadcastPackagedStateToRuntime();
+        notifyServerOfVideoInfo();
+        return;
+      }
+
+      serviceState.activeTabPort.postMessage(message);
       break;
     }
     default: {

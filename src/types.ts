@@ -488,7 +488,8 @@ export enum MessageTypes {
   Users = "users",
   Follow = "follow",
   StopFollowing = "stop-following",
-  Pending = "pending"
+  Pending = "pending",
+  RequestVideoInfo = "request-video-info"
 };
 
 export interface GenericMessage {
@@ -934,6 +935,25 @@ export function isPendingMessage(object: any | null | undefined): object is Pend
   return true;
 }
 
+export interface RequestVideoInfoMessage {
+  type: MessageTypes.RequestVideoInfo
+};
+
+export function isRequestVideoInfoMessage(object: any | null | undefined): object is RequestVideoInfoMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.RequestVideoInfo) {
+    return false;
+  }
+
+  return true;
+}
 
 export type Message = (
   GenericMessage |
@@ -952,7 +972,8 @@ export type Message = (
   UsersMessage |
   FollowMessage |
   StopFollowingMessage |
-  PendingMessage
+  PendingMessage |
+  RequestVideoInfoMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

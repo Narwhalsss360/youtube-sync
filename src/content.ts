@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, PortAvailableMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, PortAvailableMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
@@ -202,6 +202,14 @@ function sendVideoInfo() {
   moduleState.backgroundServicePort.postMessage(videoInfoMessage);
 }
 
+function getPlaybackInfo(video: HTMLVideoElement): PlaybackInfo {
+  return {
+    state: videoPlaybackState(video),
+    currentTime: video.currentTime,
+    playbackRate: video.playbackRate
+  }
+}
+
 function getPlaybackInfoAndSend(evt: Event) {
   const following = moduleState.packagedServiceState?.users.find(user => moduleState.packagedServiceState?.user.followingUUID === user.uuid && user.videoInfo);
   let followPromise = following ? follow(following) : Promise.resolve();
@@ -212,9 +220,7 @@ function getPlaybackInfoAndSend(evt: Event) {
     }
 
     const video = evt.target as HTMLVideoElement;
-    moduleState.videoInfoCache.playbackInfo.state = videoPlaybackState(video);
-    moduleState.videoInfoCache.playbackInfo.currentTime = video.currentTime;
-    moduleState.videoInfoCache.playbackInfo.playbackRate = video.playbackRate;
+    moduleState.videoInfoCache.playbackInfo = getPlaybackInfo(video);
     sendVideoInfo();
   })
 }
@@ -361,6 +367,17 @@ function processPortMessage(
       if (following?.videoInfo) {
         follow(following);
       }
+      break;
+    }
+    case MessageTypes.RequestVideoInfo: {
+      wellDefinedMessage(isRequestVideoInfoMessage, MessageTypes.RequestVideoInfo, message);
+      const video = document.querySelector("video");
+      if (!video?.src) {
+        moduleState.videoInfoCache = null;
+      } if (moduleState.videoInfoCache !== null && video) {
+        moduleState.videoInfoCache.playbackInfo = getPlaybackInfo(video);
+      }
+      sendVideoInfo();
       break;
     }
     default: {
