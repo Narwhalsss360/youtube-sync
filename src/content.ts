@@ -1,17 +1,19 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, PortAvailableMessage, SetActiveTabMessage, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, Message, MessageTypes, PackagedServiceState, PlaybackState, PortAvailableMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
   videoInfoCache: VideoInfo | null
   backgroundServicePort: browser.runtime.Port | null,
-  packagedServiceState: PackagedServiceState | null
+  packagedServiceState: PackagedServiceState | null,
+  maxDeviation: number,
 } = {
   isActiveTab: () => moduleState.backgroundServicePort !== null,
   videoInfoCache: null,
   backgroundServicePort: null,
-  packagedServiceState: null
+  packagedServiceState: null,
+  maxDeviation: 1
 };
 
 function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) => boolean): HTMLElement | null {
@@ -175,9 +177,21 @@ function waitForMetadata(): Promise<VideoInfo> {
   });
 }
 
+let ensureVideoInfoIsSentIntervalId: ReturnType<typeof setInterval> | null = null;
+const ENSURE_VIDEO_INFO_SENT_INTERVAL: number = 10;
+
 function sendVideoInfo() {
-  if (!moduleState.isActiveTab() || moduleState.videoInfoCache === null || moduleState.backgroundServicePort == null) {
+  if (!moduleState.isActiveTab() || moduleState.backgroundServicePort === null) {
+    if (ensureVideoInfoIsSentIntervalId === null) {
+      ensureVideoInfoIsSentIntervalId = setInterval(() => {
+        sendVideoInfo();
+      }, ENSURE_VIDEO_INFO_SENT_INTERVAL);
+    }
     return;
+  }
+
+  if (ensureVideoInfoIsSentIntervalId !== null) {
+    clearInterval(ensureVideoInfoIsSentIntervalId);
   }
 
   const videoInfoMessage: VideoInfoMessage = {
@@ -188,32 +202,37 @@ function sendVideoInfo() {
   moduleState.backgroundServicePort.postMessage(videoInfoMessage);
 }
 
-function getStateAndSend(evt: Event) {
-  if (moduleState.videoInfoCache === null) {
-    return;
-  }
+function getPlaybackInfoAndSend(evt: Event) {
+  const following = moduleState.packagedServiceState?.users.find(user => moduleState.packagedServiceState?.user.followingUUID === user.uuid && user.videoInfo);
+  let followPromise = following ? follow(following) : Promise.resolve();
 
-  const video = evt.target as HTMLVideoElement;
-  moduleState.videoInfoCache.playbackInfo.state = videoPlaybackState(video);
-  moduleState.videoInfoCache.playbackInfo.currentTime = video.currentTime;
-  moduleState.videoInfoCache.playbackInfo.playbackRate = video.playbackRate;
-  sendVideoInfo();
+  followPromise.then(() => {
+    if (moduleState.videoInfoCache === null) {
+      return;
+    }
+
+    const video = evt.target as HTMLVideoElement;
+    moduleState.videoInfoCache.playbackInfo.state = videoPlaybackState(video);
+    moduleState.videoInfoCache.playbackInfo.currentTime = video.currentTime;
+    moduleState.videoInfoCache.playbackInfo.playbackRate = video.playbackRate;
+    sendVideoInfo();
+  })
 }
 
 function registerVideoElementEvents(video: HTMLVideoElement): void {
-  video.addEventListener("playing", getStateAndSend);
-  video.addEventListener("pause", getStateAndSend);
-  video.addEventListener("waiting", getStateAndSend);
-  video.addEventListener("ratechange", getStateAndSend);
-  video.addEventListener("timeupdate", getStateAndSend);
+  video.addEventListener("playing", getPlaybackInfoAndSend);
+  video.addEventListener("pause", getPlaybackInfoAndSend);
+  video.addEventListener("waiting", getPlaybackInfoAndSend);
+  video.addEventListener("ratechange", getPlaybackInfoAndSend);
+  video.addEventListener("timeupdate", getPlaybackInfoAndSend);
 }
 
 function removeVideoElementEvents(video: HTMLVideoElement): void {
-  video.removeEventListener("playing", getStateAndSend);
-  video.removeEventListener("pause", getStateAndSend);
-  video.removeEventListener("waiting", getStateAndSend);
-  video.removeEventListener("ratechange", getStateAndSend);
-  video.removeEventListener("timeupdate", getStateAndSend);
+  video.removeEventListener("playing", getPlaybackInfoAndSend);
+  video.removeEventListener("pause", getPlaybackInfoAndSend);
+  video.removeEventListener("waiting", getPlaybackInfoAndSend);
+  video.removeEventListener("ratechange", getPlaybackInfoAndSend);
+  video.removeEventListener("timeupdate", getPlaybackInfoAndSend);
 }
 
 function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => void) {
@@ -260,6 +279,60 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
   });
 }
 
+function follow(user: User): Promise<void> {
+  if (user.videoInfo === null) {
+    console.log("Following a user that is not watching a video. Doing nothing");
+    return Promise.resolve();
+  }
+
+  if (user.videoInfo.videoId !== new URLSearchParams(window.location.search).get("v")) {
+    window.location.assign(`https://youtube.com/watch?v=${user.videoInfo.videoId}`);
+    return Promise.resolve();
+  }
+
+  return waitForVideoElement().then(video => {
+    if (user.videoInfo === null) {
+      return;
+    }
+
+    if (video.readyState <= 2) {
+      return;
+    }
+
+    if (user.videoInfo.playbackInfo.state === PlaybackState.Waiting) {
+      if (!video.paused) {
+        video.pause();
+      }
+      video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      return
+    }
+
+    if (user.videoInfo.playbackInfo.playbackRate !== video.playbackRate) {
+      video.playbackRate = user.videoInfo.playbackInfo.playbackRate;
+    }
+
+    if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
+      if (!video.paused) {
+        video.pause();
+      }
+      if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
+        video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      }
+      return;
+    }
+
+    if (video.paused) {
+      video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      video.play();
+      return;
+    }
+
+    if (Math.abs(user.videoInfo.playbackInfo.currentTime - video.currentTime) > moduleState.maxDeviation) {
+      video.currentTime = user.videoInfo.playbackInfo.currentTime;
+    }
+  });
+}
+
 function processPortMessage(
   message: Message,
   port: browser.runtime.Port
@@ -284,6 +357,10 @@ function processPortMessage(
         MessageTypes.PackagedServiceState,
         message
       ).packagedServiceState;
+      const following = moduleState.packagedServiceState.users.find(user => moduleState.packagedServiceState?.user.followingUUID === user.uuid);
+      if (following?.videoInfo) {
+        follow(following);
+      }
       break;
     }
     default: {

@@ -125,7 +125,6 @@ function processSelfUpdateFromServer(user: User): void {
 
   const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
   serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
-  serviceState.user = user;
   serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
 }
 
@@ -458,7 +457,7 @@ function processRuntimeMessage(
           serviceState.activeTab = null;
           serviceState.activeTabPort = null;
           serviceState.user.videoInfo = null;
-          const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+          broadcastPackagedStateToRuntime();
           notifyServerOfVideoInfo();
         });
       })();
