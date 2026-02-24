@@ -480,6 +480,7 @@ export enum MessageTypes {
   SetActiveTab = "set-active-tab",
   Acknowledge = "acknowledge",
   ConnectToServerAs = "connect-to-server-as",
+  DisconnectFromServer = "disconnect-from-server",
   ServerHandshakeRequest = "server-handshake-request",
   ServerHandshake = "server-handshake",
   User = "user",
@@ -622,7 +623,7 @@ export function isSetActiveTabMessage(object: any | null | undefined): object is
     if (object.tabId <= 0) {
       return false;
     }
-  } else if (object !== null) {
+  } else if (object.tabId !== null) {
     return false;
   }
 
@@ -681,6 +682,26 @@ export function isConnectToServerAsMessage(object: any | null | undefined): obje
   }
 
   if (object.url.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface DisconnectFromServerMessage extends GenericMessage {
+  type: MessageTypes.DisconnectFromServer,
+};
+
+export function isDisconnectFromServerMessage(object: any | null | undefined): object is DisconnectFromServerMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.DisconnectFromServer) {
     return false;
   }
 
@@ -935,7 +956,7 @@ export function isPendingMessage(object: any | null | undefined): object is Pend
   return true;
 }
 
-export interface RequestVideoInfoMessage {
+export interface RequestVideoInfoMessage extends GenericMessage {
   type: MessageTypes.RequestVideoInfo
 };
 
@@ -964,6 +985,7 @@ export type Message = (
   SetActiveTabMessage |
   AcknowledgeMessage |
   ConnectToServerAsMessage |
+  DisconnectFromServerMessage |
   ServerHandshakeRequestMessage |
   ServerHandshakeMessage |
   UserMessage |

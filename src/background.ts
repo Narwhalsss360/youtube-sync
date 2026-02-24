@@ -35,7 +35,8 @@ import {
   GenericMessage,
   StopFollowingMessage,
   isStopFollowingMessage,
-  isRequestVideoInfoMessage
+  isRequestVideoInfoMessage,
+  isDisconnectFromServerMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -426,6 +427,7 @@ function processRuntimeMessage(
             tab = await browser.tabs.get(setActiveTabMessage.tabId);
           } catch (err) {
             console.error(`Tab ${setActiveTabMessage.tabId} does not exist.`);
+            return;
           }
         }
 
@@ -437,6 +439,22 @@ function processRuntimeMessage(
         if (tab === undefined) {
           serviceState.activeTab = null;
           serviceState.activeTabPort = null;
+          broadcastPackagedStateToRuntime();
+          return;
+        }
+
+        if (tab.url === undefined) {
+          console.error("Invalid tab.");
+          return;
+        }
+
+        if (new URL(tab.url).origin !== "https://www.youtube.com") {
+          const errorMessage: ErrorMessage = {
+            type: MessageTypes.Error,
+            message: "Cannot set as active tab, not a youtube tab.",
+            sender: "Background Service Worker"
+          };
+          sendResponse(errorMessage);
           return;
         }
 
@@ -475,6 +493,7 @@ function processRuntimeMessage(
           broadcastPackagedStateToRuntime();
           notifyServerOfVideoInfo();
         });
+        broadcastPackagedStateToRuntime();
       })();
     }
     case MessageTypes.ConnectToServerAs: {
@@ -551,6 +570,20 @@ function processRuntimeMessage(
         cleanupServerConnection();
       });
 
+      break;
+    }
+    case MessageTypes.DisconnectFromServer: {
+      wellDefinedMessage(isDisconnectFromServerMessage, MessageTypes.DisconnectFromServer, message);
+      if (serviceState.serverConnection === null) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Not connected to a server",
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        return
+      }
+      serviceState.serverConnection.close();
       break;
     }
     case MessageTypes.PortAvailable: {
