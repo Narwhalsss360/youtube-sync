@@ -590,8 +590,10 @@ export function isVideoInfoMessage(object: any | null | undefined): object is Vi
     return false;
   }
 
-  if (!isVideoInfo(object.videoInfo)) {
-    return false;
+  if (object.videoInfo !== null) {
+    if (!isVideoInfo(object.videoInfo)) {
+      return false;
+    }
   }
 
   return true;
