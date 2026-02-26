@@ -387,7 +387,8 @@ export interface PackagedServiceState {
   users: Array<User>,
   activeTabId: number | null,
   serverAddress: string | null,
-  pendingServerRequests: Array<GenericMessage>
+  pendingServerRequests: Array<GenericMessage>,
+  availableTabIds: Array<number>
 };
 
 export function isPackagedServiceState(object: any | null | undefined): object is PackagedServiceState {
@@ -435,6 +436,16 @@ export function isPackagedServiceState(object: any | null | undefined): object i
 
   for (const pending of object.pendingServerRequests) {
     if (!isGenericMessage(pending)) {
+      return false;
+    }
+  }
+
+  if (!Array.isArray(object.availableTabIds)) {
+    return false;
+  }
+
+  for (const id of object.availableTabIds) {
+    if (typeof id !== "number") {
       return false;
     }
   }

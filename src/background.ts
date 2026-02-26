@@ -36,7 +36,8 @@ import {
   StopFollowingMessage,
   isStopFollowingMessage,
   isRequestVideoInfoMessage,
-  isDisconnectFromServerMessage
+  isDisconnectFromServerMessage,
+  wellDefined
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -50,7 +51,8 @@ const serviceState: {
   activeTabPort: browser.runtime.Port | null,
   serverConnection: WebSocket | null,
   reconnectToTab: number | null,
-  pendingServerRequests: Array<GenericMessage>
+  pendingServerRequests: Array<GenericMessage>,
+  availableTabIds: Set<number>
 } = {
   user: structuredClone(userDefaults),
   users: [],
@@ -58,7 +60,8 @@ const serviceState: {
   activeTabPort: null,
   serverConnection: null,
   reconnectToTab: null,
-  pendingServerRequests: []
+  pendingServerRequests: [],
+  availableTabIds: new Set()
 };
 
 function getTabId(tab: browser.tabs.Tab): number {
@@ -74,7 +77,8 @@ function packageServiceState(): PackagedServiceState {
     users: serviceState.users,
     activeTabId: serviceState.activeTab?.id ?? null,
     serverAddress: serviceState.serverConnection?.url ?? null,
-    pendingServerRequests: serviceState.pendingServerRequests
+    pendingServerRequests: serviceState.pendingServerRequests,
+    availableTabIds: Array.from(serviceState.availableTabIds)
   };
 }
 
@@ -442,6 +446,10 @@ function processRuntimeMessage(
           broadcastPackagedStateToRuntime();
           return;
         }
+        setActiveTabMessage.tabId = wellDefined(
+          setActiveTabMessage.tabId,
+          Error("tab === undefined is used as a sentinel value to represent whether setActiveTabMessage.tabId was null")
+        );
 
         if (tab.url === undefined) {
           console.error("Invalid tab.");
@@ -452,6 +460,36 @@ function processRuntimeMessage(
           const errorMessage: ErrorMessage = {
             type: MessageTypes.Error,
             message: "Cannot set as active tab, not a youtube tab.",
+            sender: "Background Service Worker"
+          };
+          sendResponse(errorMessage);
+          return;
+        }
+
+        if (tab.status !== "complete") {
+          const errorMessage: ErrorMessage = {
+            type: MessageTypes.Error,
+            message: "Cannot set as active tab, loading not complete.",
+            sender: "Background Service Worker"
+          };
+          sendResponse(errorMessage);
+          return;
+        }
+
+        if (tab.id === browser.tabs.TAB_ID_NONE) {
+          const errorMessage: ErrorMessage = {
+            type: MessageTypes.Error,
+            message: "Cannot set as active tab, this tab does not host content.",
+            sender: "Background Service Worker"
+          };
+          sendResponse(errorMessage);
+          return;
+        }
+
+        if (!serviceState.availableTabIds.has(setActiveTabMessage.tabId)) {
+          const errorMessage: ErrorMessage = {
+            type: MessageTypes.Error,
+            message: "Cannot set as active tab, this tab does not host content.",
             sender: "Background Service Worker"
           };
           sendResponse(errorMessage);
@@ -588,6 +626,13 @@ function processRuntimeMessage(
     }
     case MessageTypes.PortAvailable: {
       wellDefinedMessage(isPortAvailableMessage, MessageTypes.PortAvailable, message);
+      if (sender.tab?.id === undefined) {
+        return;
+      }
+
+      serviceState.availableTabIds.add(sender.tab.id);
+      broadcastPackagedStateToRuntime();
+
       if (serviceState.reconnectToTab === null) {
         return;
       }
@@ -595,6 +640,10 @@ function processRuntimeMessage(
       if (sender.tab === undefined) {
         console.warn(`The following console warning message is a sender which is not a tab that presented as a tab with a port available:`);
         console.warn(sender);
+        return;
+      }
+
+      if (sender.tab.id === undefined) {
         return;
       }
 
@@ -727,6 +776,42 @@ function processRuntimeMessage(
   }
 }
 
+function tabUpdated(tabId: number, changeInfo: any, tab: browser.tabs.Tab): void {
+  if (!serviceState.availableTabIds.has(tabId)) {
+    return;
+  }
+
+  function isStillAvailable() {
+    if (tab.status !== "complete") {
+      return false;
+    }
+
+    if (tab.url === undefined) {
+      return false;
+    }
+
+    if (new URL(tab.url).origin !== "https://www.youtube.com") {
+      return false;
+    }
+
+    return true;
+  }
+
+  if (isStillAvailable()) {
+    return;
+  }
+
+  serviceState.availableTabIds.delete(tabId);
+  broadcastPackagedStateToRuntime();
+}
+
+function tabRemoved(tabId: number, removeInfo: any): void {
+  if (serviceState.availableTabIds.has(tabId)) {
+    serviceState.availableTabIds.delete(tabId);
+    broadcastPackagedStateToRuntime();
+  }
+}
+
 async function setCurrentTabAsActiveTab() {
   const candidates = await browser.tabs.query({
     active: true,
@@ -763,6 +848,8 @@ async function setCurrentTabAsActiveTab() {
 
 function main() {
   browser.runtime.onMessage.addListener(processRuntimeMessage);
+  browser.tabs.onUpdated.addListener(tabUpdated);
+  browser.tabs.onRemoved.addListener(tabRemoved);
 
   /*
   serviceState.user.uuid = "test-uuid";

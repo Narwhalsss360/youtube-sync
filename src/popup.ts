@@ -77,7 +77,8 @@ const popupState : {
     users: [],
     activeTabId: null,
     serverAddress: null,
-    pendingServerRequests: []
+    pendingServerRequests: [],
+    availableTabIds: []
   },
   usersWithSelf: () => [popupState.packagedServiceState.user, ...popupState.packagedServiceState.users],
 };
@@ -367,7 +368,11 @@ function applyState(newState: PackagedServiceState) {
   }
 
   getActiveTab().then(tab => {
-    if (tab.url === undefined) {
+    activeTabToggle.disabled = true;
+    activeTabToggle.value = "set";
+    activeTabToggle.innerText = "Set as active tab";
+
+    if (tab.url === undefined || tab.id === undefined) {
       return;
     }
 
@@ -375,13 +380,12 @@ function applyState(newState: PackagedServiceState) {
       return;
     }
 
-    activeTabToggle.disabled = false;
     if (newState.activeTabId === tab.id) {
+      activeTabToggle.disabled = false;
       activeTabToggle.value = "unset";
       activeTabToggle.innerText = "Unset as active tab";
-    } else {
-      activeTabToggle.value = "set";
-      activeTabToggle.innerText = "Set as active tab";
+    } else if (newState.availableTabIds.includes(tab.id)) {
+      activeTabToggle.disabled = false;
     }
   });
 
@@ -423,6 +427,10 @@ function processRuntimeMessage(
         MessageTypes.PackagedServiceState,
         message
       ).packagedServiceState);
+      break;
+    }
+    case MessageTypes.PortAvailable: {
+      /**Handled by background service worker, to be ignored. */
       break;
     }
     default: {
