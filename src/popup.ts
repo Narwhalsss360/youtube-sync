@@ -1,6 +1,6 @@
 import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
-import { asType, ConnectToServerAsMessage, detectUserUpdates, detectVideoInfoUpdates, DisconnectFromServerMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
+import { asType, ConnectToServerAsMessage, detectUserUpdates, detectVideoInfoUpdates, DisconnectFromServerMessage, FollowMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, StopFollowingMessage, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
 
 const badDOMError = Error("Bad DOM.");
 
@@ -269,13 +269,68 @@ function constructUserDataContainer(user: User): HTMLDivElement {
   return attachDataToUserContainer(div, user);
 }
 
+function userFollowedByDetailsToggled(followedByDetails: HTMLDetailsElement): void {
+  const summary = wellDefined(
+    followedByDetails.children[0],
+    badDOMError,
+  );
+  summary.innerHTML = `Followed By ${(followedByDetails.open ? "&#709;" : "&#708;")}`;
+}
+
+function userToggleFollowButtonClicked(button: HTMLButtonElement, user: User): void {
+  if (user.uuid === null) {
+    throw badDOMError;
+  }
+
+  if (button.value === "start") {
+    const followMessage: FollowMessage = {
+      type: MessageTypes.Follow,
+      followingUUID: user.uuid
+    }
+    browser.runtime.sendMessage(followMessage);
+  } else if (button.value === "stop") {
+    const stopFollowingMessage: StopFollowingMessage = {
+      type: MessageTypes.StopFollowing,
+      followingUUID: user.uuid
+    };
+    browser.runtime.sendMessage(stopFollowingMessage);
+  } else {
+    throw badDOMError;
+  }
+}
+
+function ensureEventsAreRegistered(div: HTMLDivElement, user: User): HTMLDivElement {
+  const followedByDetails: HTMLDetailsElement | undefined = asType<HTMLDetailsElement | undefined>(
+    (element: HTMLElement) => element instanceof HTMLDetailsElement,
+    div.querySelector(`#${userElementIdPrefix(user.uuid, "followed-by-details")}`)
+  );
+
+
+  if (followedByDetails && followedByDetails.getAttribute("event-registered") !== "true") {
+    followedByDetails.setAttribute("event-registered", "true");
+    followedByDetails.addEventListener("toggle", () => userFollowedByDetailsToggled(followedByDetails));
+  }
+
+  const toggleFollowButton: HTMLButtonElement | undefined =asType<HTMLButtonElement | undefined>(
+    (element: HTMLElement) => element instanceof HTMLButtonElement,
+    div.querySelector(`#${userElementIdPrefix(user.uuid, "toggle-follow-button")}`)
+  );
+
+  if (toggleFollowButton && toggleFollowButton.getAttribute("event-registered") !== "true") {
+    toggleFollowButton.setAttribute("event-registered", "true");
+    toggleFollowButton.addEventListener("click", () => userToggleFollowButtonClicked(toggleFollowButton, user))
+  }
+
+  return div;
+}
+
 function updateUserData(previousUserData: User | undefined, user: User): void {
   if (user.uuid === null) {
     return;
   }
 
   if (previousUserData === undefined) {
-    popupState.usersDiv.appendChild(constructUserDataContainer(user));
+    popupState.usersDiv.appendChild(ensureEventsAreRegistered(constructUserDataContainer(user), user));
     return;
   }
 
@@ -344,6 +399,8 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
       badDOMError
     ).innerHTML = constructUserStatusInnerHTML(user);
   }
+
+  ensureEventsAreRegistered(div, user);
 }
 
 function applyState(newState: PackagedServiceState) {
