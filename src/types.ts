@@ -501,7 +501,8 @@ export enum MessageTypes {
   Follow = "follow",
   StopFollowing = "stop-following",
   Pending = "pending",
-  RequestVideoInfo = "request-video-info"
+  RequestVideoInfo = "request-video-info",
+  KeepAlive = "keep-alive"
 };
 
 export interface GenericMessage {
@@ -972,6 +973,26 @@ export interface RequestVideoInfoMessage extends GenericMessage {
 };
 
 export function isRequestVideoInfoMessage(object: any | null | undefined): object is RequestVideoInfoMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.RequestVideoInfo) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface KeepAliveMessage extends GenericMessage {
+  type: MessageTypes.KeepAlive
+};
+
+export function isKeepAliveMessage(object: any | null | undefined): object is KeepAliveMessage {
   if (typeof object !== "object") {
     return false;
   }

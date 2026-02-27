@@ -37,7 +37,8 @@ import {
   isStopFollowingMessage,
   isRequestVideoInfoMessage,
   isDisconnectFromServerMessage,
-  wellDefined
+  wellDefined,
+  isKeepAliveMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -333,6 +334,10 @@ function processServerMessage(message: Message) {
       }
 
       serviceState.activeTabPort.postMessage(message);
+      break;
+    }
+    case MessageTypes.KeepAlive: {
+      wellDefinedMessage(isKeepAliveMessage, MessageTypes.KeepAlive, message);
       break;
     }
     default: {
