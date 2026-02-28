@@ -177,7 +177,7 @@ function constructUserStatusInnerHTML(user: User): string {
     innerHTML = (
       `<details id="${userElementIdPrefix(user.uuid, "followed-by-details")}">
         <summary>Followed by &#708;</summary>
-        <div class="text-div">${user.followerUUIDs.join(", ")}</div>
+        <div class="text-div">${user.followerUUIDs.map(uuid => wellDefined(popupState.packagedServiceState.users.find(user => user.uuid === uuid), Error("Bad state")).username).join(", ")}</div>
       </details>`
     );
   }
