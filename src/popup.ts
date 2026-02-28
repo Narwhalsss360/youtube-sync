@@ -2,14 +2,18 @@ import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
 import { asType, ConnectToServerAsMessage, detectUserUpdates, detectVideoInfoUpdates, DisconnectFromServerMessage, FollowMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, StopFollowingMessage, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
 
-const badDOMError = Error("Bad DOM.");
+function constructBadDOMError(message: string, element: HTMLElement | null | undefined = undefined): Error {
+  return element ?
+    new Error(`Bad DOM Error: ${element.tagName}#${element.id}`) :
+    new Error("Bad DOM Error");
+}
 
 const activeTabToggle: HTMLButtonElement = wellDefined(
     asType<HTMLButtonElement>(
     (element: HTMLElement) => element instanceof HTMLButtonElement,
     document.getElementById("active-tab-toggle")
   ),
-  badDOMError
+  constructBadDOMError("Bad active-tab-toggle")
 );
 
 const connectAsForm: HTMLFormElement = wellDefined(
@@ -17,7 +21,7 @@ const connectAsForm: HTMLFormElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLFormElement,
     document.getElementById("connect-as-form")
   ),
-  badDOMError
+  constructBadDOMError("Bad connect-as-form")
 );
 
 const usernameInput: HTMLInputElement = wellDefined(
@@ -25,7 +29,7 @@ const usernameInput: HTMLInputElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLInputElement,
     document.getElementById("username-input")
   ),
-  badDOMError
+  constructBadDOMError("bad username-input")
 );
 
 const serverAddressInput: HTMLInputElement = wellDefined(
@@ -33,7 +37,7 @@ const serverAddressInput: HTMLInputElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLInputElement,
     document.getElementById("server-address-input")
   ),
-  badDOMError
+  constructBadDOMError("Bad server-address-input")
 )
 
 const connectButton: HTMLButtonElement = wellDefined(
@@ -41,7 +45,7 @@ const connectButton: HTMLButtonElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLButtonElement,
     document.getElementById("connect-button")
   ),
-  badDOMError
+  constructBadDOMError("Bad connect-button")
 );
 
 const disconnectForm: HTMLFormElement = wellDefined(
@@ -49,7 +53,7 @@ const disconnectForm: HTMLFormElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLFormElement,
     document.getElementById("disconnect-form")
   ),
-  badDOMError
+  constructBadDOMError("Bad disconnect-form")
 );
 
 const disconnectServerAddress: HTMLInputElement = wellDefined(
@@ -57,7 +61,7 @@ const disconnectServerAddress: HTMLInputElement = wellDefined(
     (element: HTMLElement) => element instanceof HTMLInputElement,
     document.getElementById("disconnect-server-address")
   ),
-  badDOMError
+  constructBadDOMError("Bad disconnect-server-address")
 );
 
 const popupState : {
@@ -70,7 +74,7 @@ const popupState : {
       (element: HTMLElement) => element instanceof HTMLDivElement,
       document.getElementById("users")
     ),
-    badDOMError
+    constructBadDOMError("This element must exist in the DOM.")
   ),
   packagedServiceState: {
     user: userDefaults,
@@ -272,14 +276,14 @@ function constructUserDataContainer(user: User): HTMLDivElement {
 function userFollowedByDetailsToggled(followedByDetails: HTMLDetailsElement): void {
   const summary = wellDefined(
     followedByDetails.children[0],
-    badDOMError,
+    constructBadDOMError("The first element of details must be summary", followedByDetails)
   );
   summary.innerHTML = `Followed By ${(followedByDetails.open ? "&#709;" : "&#708;")}`;
 }
 
 function userToggleFollowButtonClicked(button: HTMLButtonElement, user: User): void {
   if (user.uuid === null) {
-    throw badDOMError;
+    throw constructBadDOMError("Every user in DOM must have a uuid.");
   }
 
   if (button.value === "start") {
@@ -295,7 +299,7 @@ function userToggleFollowButtonClicked(button: HTMLButtonElement, user: User): v
     };
     browser.runtime.sendMessage(stopFollowingMessage);
   } else {
-    throw badDOMError;
+    throw constructBadDOMError("The toggle follow button must have a value of either 'start' or 'stop'", button);
   }
 }
 
@@ -343,7 +347,7 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
       (element: HTMLElement) => element instanceof HTMLDivElement,
       document.getElementById(userElementIdPrefix(user.uuid))
     ),
-    badDOMError
+    constructBadDOMError("If previousUserData was defined, then it was expected that, that previousUserData has updated the DOM to conatin the user's data div.")
   );
 
   const updates = detectUserUpdates(previousUserData, user);
@@ -354,7 +358,7 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
         (element: any) => element instanceof HTMLDivElement,
         document.getElementById(userElementIdPrefix(user.uuid, "username"))
       ),
-      badDOMError
+      constructBadDOMError("Every user in DOM must have a username.")
     ).innerText = user.username;
   }
 
@@ -369,7 +373,7 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
             (element: HTMLElement) => element instanceof HTMLDivElement,
             document.getElementById(userElementIdPrefix("video-info"))
           ),
-          badDOMError
+          constructBadDOMError("If neither video info is not null for previous and new data, then watch-progress-container is expected to exist.")
         ).innerHTML = constructVideoInfoInnerHTML(user);
       } else if (videoInfoUpdates.includes("playbackInfo")) {
         wellDefined(
@@ -377,14 +381,14 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
             (element: HTMLElement) => element instanceof HTMLDivElement,
             document.getElementById(userElementIdPrefix(user.uuid, "timestamps"))
           ),
-          badDOMError
+          constructBadDOMError("If neither video info is not null for previous and new data, then watch-progress-container is expected to exist.")
         ).innerHTML = constructUserTimestampsInnerHTML(user);
         wellDefined(
           asType<HTMLDivElement>(
             (element: HTMLElement) => element instanceof HTMLDivElement,
             document.getElementById(userElementIdPrefix(user.uuid, "watch-progress-container"))
           ),
-          badDOMError
+          constructBadDOMError("If neither video info is not null for previous and new data, then watch-progress-container is expected to exist.")
         ).innerHTML = constructUserWatchProgressContainerInnerHTML(user);
       }
     }
@@ -396,7 +400,7 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
         (element: any) => element instanceof HTMLDivElement,
         document.getElementById(userElementIdPrefix(user.uuid, "status"))
       ),
-      badDOMError
+      constructBadDOMError("user status.")
     ).innerHTML = constructUserStatusInnerHTML(user);
   }
 
@@ -516,7 +520,7 @@ async function activeTabToggleActivated(): Promise<void> {
     };
     browser.runtime.sendMessage(setActiveTabMessage);
   } else {
-    throw badDOMError;
+    throw constructBadDOMError("Active tab  toggle button must have a value of either 'set' or 'unset'", activeTabToggle);
   }
   activeTabToggle.disabled = true;
 }
