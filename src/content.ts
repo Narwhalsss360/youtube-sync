@@ -424,7 +424,15 @@ function processRuntimeMessage(
 }
 
 function main() {
+  let isFirstUpdate: boolean = true;
   detectVideoInfo(videoInfo => {
+    if (isFirstUpdate) {
+      isFirstUpdate = false;
+      const portAvailableMessage: PortAvailableMessage = {
+        type: MessageTypes.PortAvailable
+      };
+      browser.runtime.sendMessage(portAvailableMessage);
+    }
     moduleState.videoInfoCache = videoInfo;
     sendVideoInfo();
     console.log(videoInfo)
@@ -446,11 +454,6 @@ function main() {
       console.log("Is no longer active YouTube Sync tab.");
     });
   });
-
-  const portAvailableMessage: PortAvailableMessage = {
-    type: MessageTypes.PortAvailable
-  };
-  browser.runtime.sendMessage(portAvailableMessage);
 
   (globalThis as any).contentModule = Object.freeze({
     moduleState,
