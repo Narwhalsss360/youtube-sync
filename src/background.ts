@@ -96,7 +96,7 @@ function broadcastPackagedStateToRuntime(requireReceiver: boolean = false): Pack
   return packagedServiceStateMessage;
 }
 
-function processSelfUpdateFromServer(user: User): void {
+function processSelfUpdateFromServer(user: User, broadcast: boolean = false): void {
   if (user.uuid !== serviceState.user.uuid) {
     throw new Error("This function is only valid for self");
   }
@@ -127,12 +127,17 @@ function processSelfUpdateFromServer(user: User): void {
       sender: `${serviceState.user.uuid}: Background Service Worker`
     };
     serviceState.serverConnection.send(JSON.stringify(errorMessage));
-    return;
   }
 
-  const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
-  serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
-  serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
+  serviceState.user.connectionQuality = user.connectionQuality;
+  serviceState.user.followerUUIDs = user.followerUUIDs;
+  serviceState.user.followingUUID = user.followingUUID;
+
+  if (broadcast) {
+    const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+    serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+    serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
+  }
 }
 
 function notifyServerOfVideoInfo() {
@@ -229,7 +234,7 @@ function processServerMessage(message: Message) {
 
 
       if (serviceState.user.uuid === userMessage.user.uuid) {
-        processSelfUpdateFromServer(userMessage.user);
+        processSelfUpdateFromServer(userMessage.user, true);
       } else {
         const existingIndex = serviceState.users.findIndex(user => user.uuid === userMessage.user.uuid);
         if (existingIndex === -1) {
@@ -315,11 +320,14 @@ function processServerMessage(message: Message) {
       serviceState.users = [];
       for (const user of usersMessage.users) {
         if (user.uuid === serviceState.user.uuid) {
-          processSelfUpdateFromServer(user);
+          processSelfUpdateFromServer(user, false);
         } else {
           serviceState.users.push(user);
         }
       }
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
       break;
     }
     case MessageTypes.RequestVideoInfo: {
