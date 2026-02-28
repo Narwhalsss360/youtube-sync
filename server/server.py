@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args
+from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass
 from websockets.asyncio.server import Server, serve, ServerConnection
 from websockets import ConnectionClosed
+from json import loads, dumps, JSONDecodeError
 from sys import argv
 from npycli import Command
 from asyncio import run, Task, create_task
@@ -37,21 +38,10 @@ class ConnectionQuality(str, Enum):
 
 
 class DataParseError(Exception):
-    def __init__(self, cls: type, message: str, *args) -> None:
+    def __init__(self, cls: type, message: str, *args: Any) -> None:
         super().__init__(f"Error parsing message {cls.__name__}: {message}", args)
         self.cls: type = cls
         self.message: str = message
-
-
-def enum_from_str[T](enum_type: Type[T], enum_or_str: Any) -> T:
-    assert issubclass(enum_type, Enum)
-
-    if isinstance(enum_from_str, enum_type):
-        return enum_from_str
-    try:
-        return T(enum_from_str)
-    except ValueError as e:
-        raise DataParseError(enum_type, *e.args)
 
 
 def ensure_constructed_rethrow_type_or_value_error[T](
@@ -66,7 +56,7 @@ def ensure_constructed_rethrow_type_or_value_error[T](
 
     if value is None:
         if optional:
-            return None
+            return value
         else:
             raise DataParseError(for_cls, f"The field {field_name} is not optional")
 
@@ -76,15 +66,16 @@ def ensure_constructed_rethrow_type_or_value_error[T](
         return value
 
     if is_dataclass(value_type):
-        if not hasattr(value_type, "from_data"):
+        if (from_data := getattr(value_type, "from_data")) is None and not callable(from_data):
             raise NotImplementedError(f"The type {value_type} does not have the 'from_data(cls, data: dict | Self)' class method implemented.")
-        value = value_type.from_data(value)
+
+        value = from_data(for_cls, value)
         if not type_check(value):
             raise DataParseError(for_cls, f"Type check failure for the field {field_name}")
         return value
 
     try:
-        value = value_type(value)
+        value = value_type(value) # type: ignore
         if not type_check(value):
             raise DataParseError(for_cls, f"Type check failure for the field {field_name}")
         return value
@@ -92,6 +83,19 @@ def ensure_constructed_rethrow_type_or_value_error[T](
         raise DataParseError(for_cls, *e.args)
     except ValueError as e:
         raise DataParseError(for_cls, *e.args)
+
+
+def undefined_optional(obj: Optional[Any]) -> Optional[Any]:
+    return obj
+
+
+def undefined(obj: Any) -> Any:
+    return obj
+
+
+def well_defined[T](obj: Optional[T]) -> T:
+    assert obj is not None
+    return obj
 
 
 @dataclass
@@ -104,35 +108,36 @@ class PlaybackInfo:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
         except TypeError as e:
             raise DataParseError(cls, *e.args)
 
-        parsed.state = ensure_constructed_rethrow_type_or_value_error(
+        parsed.state = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             PlaybackState,
             "state",
             parsed.state,
             False
-        )
+        ))
 
-        parsed.currentTime = ensure_constructed_rethrow_type_or_value_error(
+        parsed.currentTime = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             float,
             "currentTime",
             parsed.currentTime,
             False
-        )
+        ))
 
-        parsed.playbackRate = ensure_constructed_rethrow_type_or_value_error(
+        parsed.playbackRate = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             float,
             "playbackRate",
             parsed.playbackRate,
             False
-        )
+        ))
 
         return parsed
 
@@ -150,52 +155,53 @@ class VideoInfo:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
         except TypeError as e:
             raise DataParseError(cls, *e.args)
 
-        parsed.videoId = ensure_constructed_rethrow_type_or_value_error(
+        parsed.videoId = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "videoId",
             parsed.videoId,
             False
-        )
+        ))
 
-        parsed.title = ensure_constructed_rethrow_type_or_value_error(
+        parsed.title = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "title",
             parsed.title,
             False
-        )
+        ))
 
-        parsed.channel = ensure_constructed_rethrow_type_or_value_error(
+        parsed.channel = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "channel",
             parsed.channel,
             False
-        )
+        ))
 
 
-        parsed.channelImageUrl = ensure_constructed_rethrow_type_or_value_error(
+        parsed.channelImageUrl = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "channelImageUrl",
             parsed.channelImageUrl,
             False
-        )
+        ))
 
-        parsed.duration = ensure_constructed_rethrow_type_or_value_error(
+        parsed.duration = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             float,
             "duration",
             parsed.duration,
             False
-        )
+        ))
 
         parsed.playbackInfo = PlaybackInfo.from_data(parsed.playbackInfo)
 
@@ -211,6 +217,7 @@ class UserHostingOptions:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -218,25 +225,25 @@ class UserHostingOptions:
             raise DataParseError(cls, *e.args)
 
 
-        if not isinstance(parsed.cohostsUUID, list):
+        if not isinstance(undefined(parsed.cohostsUUID), list):
             raise DataParseError(cls, f"cohostsUUID must be a list")
 
         for i, value in zip(range(len(parsed.cohostsUUID)), parsed.cohostsUUID):
-            parsed.cohostsUUID[i].value = ensure_constructed_rethrow_type_or_value_error(
+            parsed.cohostsUUID[i] = well_defined(ensure_constructed_rethrow_type_or_value_error(
                 cls,
                 str,
                 f"cohostosUUID[{i}]",
                 value,
                 False
-            )
+            ))
 
-        parsed.waitForBufferingFollowers = ensure_constructed_rethrow_type_or_value_error(
+        parsed.waitForBufferingFollowers = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             bool,
             "waitForBufferingFollowers",
             parsed.waitForBufferingFollowers,
             False
-        )
+        ))
 
         return parsed
 
@@ -250,27 +257,28 @@ class UserFollowingOptions:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
         except TypeError as e:
             raise DataParseError(cls, *e.args)
 
-        parsed.onDegradedConnectionContinuationOption = ensure_constructed_rethrow_type_or_value_error(
+        parsed.onDegradedConnectionContinuationOption = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             ContinuationOption,
             "onDegradedConnectionContinuationOption",
             parsed.onDegradedConnectionContinuationOption,
             False
-        )
+        ))
 
-        parsed.onHostDegradedConnectionContinuationOption = ensure_constructed_rethrow_type_or_value_error(
+        parsed.onHostDegradedConnectionContinuationOption = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             ContinuationOption,
             "onHostDegradedConnectionContinuationOption",
             parsed.onHostDegradedConnectionContinuationOption,
             False
-        )
+        ))
 
         return parsed
 
@@ -290,6 +298,7 @@ class User:
     def from_data(cls: type[Self], data: dict[str, Any] | Self, require_uuid: bool = True) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -297,37 +306,37 @@ class User:
             raise DataParseError(cls, *e.args)
 
         if require_uuid:
-            parsed.uuid = ensure_constructed_rethrow_type_or_value_error(
+            parsed.uuid = well_defined(ensure_constructed_rethrow_type_or_value_error(
                 cls,
                 str,
                 "uuid",
                 parsed.uuid,
                 False,
-                is_user_uuid
+                is_user_uuid)
             )
 
-        parsed.username = ensure_constructed_rethrow_type_or_value_error(
+        parsed.username = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "username",
             parsed.username,
             False
-        )
+        ))
 
-        parsed.hostingOptions = ensure_constructed_rethrow_type_or_value_error(
+        parsed.hostingOptions = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             UserHostingOptions,
             "hostingOptions",
             parsed.hostingOptions,
             False
-        )
-        parsed.reconnectToServerOnLoss = ensure_constructed_rethrow_type_or_value_error(
+        ))
+        parsed.reconnectToServerOnLoss = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             bool,
             "reconnectToServerOnLoss",
             parsed.reconnectToServerOnLoss,
             False
-        )
+        ))
         parsed.connectionQuality = ensure_constructed_rethrow_type_or_value_error(
             cls,
             ConnectionQuality,
@@ -352,13 +361,13 @@ class User:
         )
 
         for i, value in zip(range(len(parsed.followerUUIDs)), parsed.followerUUIDs):
-            parsed.followerUUIDs[i].value = ensure_constructed_rethrow_type_or_value_error(
+            parsed.followerUUIDs[i] = well_defined(ensure_constructed_rethrow_type_or_value_error(
                 cls,
                 str,
                 f"followerUUIDs[{i}]",
                 value,
                 False
-            )
+            ))
 
         return parsed
 
@@ -394,6 +403,7 @@ class ErrorMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -403,20 +413,20 @@ class ErrorMessage:
         if parsed.type != cls.MESSAGE_TYPE_VALUE:
             raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
 
-        parsed.message = ensure_constructed_rethrow_type_or_value_error(
+        parsed.message = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "message",
             parsed.message,
             False
-        )
-        parsed.sender = ensure_constructed_rethrow_type_or_value_error(
+        ))
+        parsed.sender = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "sender",
             parsed.sender,
             False
-        )
+        ))
 
         return parsed
 
@@ -431,6 +441,7 @@ class ServerHandshakeRequestMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -446,10 +457,10 @@ class ServerHandshakeRequestMessage:
 
 @dataclass
 class ServerHandshakeMessage:
-    MESSAGE_TYPE = MessageTypes.ServerHandshake.value
+    MESSAGE_TYPE_VALUE = MessageTypes.ServerHandshake.value
     uuid: str
     users: list[User]
-    type: str = field(default=MESSAGE_TYPE)
+    type: str = field(default=MESSAGE_TYPE_VALUE)
 
 
 @dataclass
@@ -461,6 +472,7 @@ class AcknowledgeMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -484,6 +496,7 @@ class VideoInfoMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -493,13 +506,13 @@ class VideoInfoMessage:
         if parsed.type != cls.MESSAGE_TYPE_VALUE:
             raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
 
-        parsed.uuid = ensure_constructed_rethrow_type_or_value_error(
+        parsed.uuid = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "uuid",
             parsed.uuid,
             False
-        )
+        ))
 
         parsed.videoInfo = ensure_constructed_rethrow_type_or_value_error(
             cls,
@@ -522,6 +535,7 @@ class UserMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -534,7 +548,6 @@ class UserMessage:
         parsed.user = User.from_data(parsed.user)
 
         return parsed
-
 
 
 @dataclass
@@ -554,6 +567,7 @@ class FollowMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -563,13 +577,13 @@ class FollowMessage:
         if parsed.type != cls.MESSAGE_TYPE_VALUE:
             raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
 
-        parsed.followingUUID = ensure_constructed_rethrow_type_or_value_error(
+        parsed.followingUUID = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "followingUUID",
             parsed.followingUUID,
             False,
-            is_user_uuid
+            is_user_uuid)
         )
 
         return parsed
@@ -585,6 +599,7 @@ class StopFollowingMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -594,13 +609,13 @@ class StopFollowingMessage:
         if parsed.type != cls.MESSAGE_TYPE_VALUE:
             raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
 
-        parsed.followingUUID = ensure_constructed_rethrow_type_or_value_error(
+        parsed.followingUUID = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "followingUUID",
             parsed.followingUUID,
             False,
-            is_user_uuid
+            is_user_uuid)
         )
 
         return parsed
@@ -615,6 +630,7 @@ class RequestVideoInfoMessage:
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
         if isinstance(data, cls):
             return data
+        assert isinstance(data, dict)
 
         try:
             parsed: Self = cls(**data)
@@ -632,6 +648,7 @@ class KeepAliveMessage:
     MESSAGE_TYPE_VALUE = MessageTypes.KeepAlive.value
     type: str = field(default=MESSAGE_TYPE_VALUE)
 
+
 type Message = (
     ErrorMessage |
     ServerHandshakeRequestMessage |
@@ -646,25 +663,45 @@ type Message = (
     KeepAliveMessage
 )
 
+
+type ReceivableMessage = (
+    ErrorMessage |
+    ServerHandshakeRequestMessage |
+    AcknowledgeMessage |
+    VideoInfoMessage |
+    UserMessage |
+    FollowMessage |
+    StopFollowingMessage |
+    RequestVideoInfoMessage
+)
+
+receiveable_message_classes: tuple[Type[ReceivableMessage]] = get_args(ReceivableMessage.__value__)
+
 def parse_message(data: Any) -> Any:
     if not isinstance(data, dict):
         raise DataParseError(GenericMessage, "Data must be a dictionary/JSON object.")
+    elif isinstance(data, str):
+        try:
+            return parse_message(loads(data))
+        except JSONDecodeError as e:
+            raise DataParseError(GenericMessage, *e.args)
+    assert isinstance(data, dict)
 
-    if "type" not in data:
+    if "type" not in data or not isinstance(data["type"], str):
         raise DataParseError(GenericMessage, f"Message type required for every message.")
+    message_type: str = data["type"]
 
-    message_type: Optional[Type[Message]] = next(
+    cls = next(
         filter(
-            lambda t: t.MESSAGE_TYPE_VALUE == data["type"],
-            get_args(Message.__value__)
+            lambda t: t.MESSAGE_TYPE_VALUE == message_type,
+            receiveable_message_classes
         ),
         None
     )
 
-    if message_type is None:
+    if cls is None:
         raise DataParseError(GenericMessage, f"Type '{data["type"]}' is not a message type.")
-    message_type: Type[Message] = message_type
-    return message_type.from_data(data)
+    return cls.from_data(cast(dict[str, Any], data))
 
 
 class LevelNames(str, Enum):
@@ -678,8 +715,12 @@ class LevelNames(str, Enum):
     notset = 0
 
 
+async def send_to(user: ServerConnection | User, message: ReceivableMessage, log_level: int) -> None:
+    ...
+
+
 async def connection_handler(connection: ServerConnection) -> None:
-    raise NotImplementedError()
+    ...
 
 
 async def main(
@@ -691,10 +732,13 @@ async def main(
         logger.setLevel(log_level.value)
 
     async with serve(connection_handler, host, port, logger=logger) as server:
-        serve_task: Task = create_task(server.serve_forever())
+        serve_task: Task[None] = create_task(server.serve_forever())
         await serve_task
 
 
 if __name__ == "__main__":
-    cmd: Command = Command.create(main)
-    run(cmd(argv[1:]))
+    cmd: Command = Command.create(main) # type: ignore
+    if len(argv) == 1:
+        print(cmd.extended_command_help())
+    else:
+        run(cmd(argv[1:]))
