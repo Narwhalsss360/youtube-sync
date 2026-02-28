@@ -2,13 +2,15 @@ from __future__ import annotations
 from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass
-from websockets.asyncio.server import Server, serve, ServerConnection
-from websockets import ConnectionClosed
-from json import loads, dumps, JSONDecodeError
+from websockets.asyncio.server import serve, ServerConnection
+from websockets import ConnectionClosed, ConnectionClosedOK
+from json import loads, JSONDecodeError
 from sys import argv
-from npycli import Command
+from npycli import Command # type: ignore
 from asyncio import run, Task, create_task
+from uuid import uuid4
 import logging
+import time
 
 
 logger = logging.getLogger()
@@ -293,6 +295,11 @@ class User:
     videoInfo: VideoInfo | None = field(hash=False)
     followingUUID: str | None = field(hash=False)
     followerUUIDs: list[str] = field(hash=False)
+
+    def __post_init__(self) -> None:
+        self.connection: ServerConnection
+        self.last_communication_time: float = time.time()
+        self.waiting_for_acknowledge: list[Message] = []
 
     @classmethod
     def from_data(cls: type[Self], data: dict[str, Any] | Self, require_uuid: bool = True) -> Self:
@@ -663,7 +670,6 @@ type Message = (
     KeepAliveMessage
 )
 
-
 type ReceivableMessage = (
     ErrorMessage |
     ServerHandshakeRequestMessage |
@@ -677,7 +683,7 @@ type ReceivableMessage = (
 
 receiveable_message_classes: tuple[Type[ReceivableMessage]] = get_args(ReceivableMessage.__value__)
 
-def parse_message(data: Any) -> Any:
+def parse_message(data: Any) -> ReceivableMessage:
     if not isinstance(data, dict):
         raise DataParseError(GenericMessage, "Data must be a dictionary/JSON object.")
     elif isinstance(data, str):
@@ -715,12 +721,82 @@ class LevelNames(str, Enum):
     notset = 0
 
 
-async def send_to(user: ServerConnection | User, message: ReceivableMessage, log_level: int) -> None:
+connected_users_by_uuid: dict[str, User] = {}
+
+
+async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
+    ...
+
+
+async def broadcast(message: Message, except_for: User | None, log_level: int) -> None:
+    ...
+
+
+async def handle_disconnect(user: User) -> None:
+    ...
+
+
+async def handle_non_clerical_message(this_user: User, message: ReceivableMessage) -> None:
     ...
 
 
 async def connection_handler(connection: ServerConnection) -> None:
-    ...
+    this_user: User | None = None
+    try:
+        async for recv in connection:
+            try:
+                message: ReceivableMessage = parse_message(recv)
+            except DataParseError as e:
+                await send_to(connection, ErrorMessage(e.message, "Server"), logging.ERROR)
+                if this_user is None:
+                    return
+                continue
+
+            if this_user is None:
+                if not isinstance(message, ServerHandshakeRequestMessage):
+                    ... # This must be first message
+                    return
+
+                while (uuid := uuid4().hex) in connected_users_by_uuid:
+                    continue
+                this_user = message.user
+                this_user.uuid = uuid
+                this_user.connection = connection
+                this_user.last_communication_time = time.time()
+                this_user.waiting_for_acknowledge.append(message)
+                await send_to(this_user, ServerHandshakeMessage(uuid, list(connected_users_by_uuid.values())), logging.INFO)
+                continue
+
+            this_user.last_communication_time = time.time()
+            if isinstance(message, AcknowledgeMessage):
+                if this_user.waiting_for_acknowledge:
+                    this_user.waiting_for_acknowledge.pop()
+                    if this_user.uuid not in connected_users_by_uuid:
+                        connected_users_by_uuid[this_user.uuid] = this_user
+                        await broadcast(UserMessage(user=this_user), this_user, logging.DEBUG)
+                    continue
+                else:
+                    await send_to(this_user, ErrorMessage("Was not expecting acknowledge message. Disconnecting...", "Server"), logging.ERROR)
+                    await handle_disconnect(this_user)
+                    return
+            elif this_user.waiting_for_acknowledge:
+                await send_to(this_user, ErrorMessage("Was expecting acknowledge message. Disconnecting...", "Server"), logging.ERROR)
+                await handle_disconnect(this_user)
+                return
+
+            if hasattr(message, "uuid") and getattr(message, "uuid") != this_user.uuid:
+                await send_to(this_user, ErrorMessage("Received wrong uuid.", "Server"), logging.ERROR)
+                await handle_disconnect(this_user)
+                return
+
+            await handle_non_clerical_message(this_user, message)
+    except ConnectionClosedOK:
+        logger.info(f"Connection closed by user {connection.remote_address}.")
+    except ConnectionClosed as e:
+        logger.error(e)
+    finally:
+        if this_user is not None:
+            await handle_disconnect(this_user)
 
 
 async def main(
