@@ -2,6 +2,11 @@ from __future__ import annotations
 from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass
+from websockets.asyncio.server import Server, serve, ServerConnection
+from websockets import ConnectionClosed
+from sys import argv
+from npycli import Command
+from asyncio import run, Task, create_task
 import logging
 
 
@@ -72,7 +77,7 @@ def ensure_constructed_rethrow_type_or_value_error[T](
 
     if is_dataclass(value_type):
         if not hasattr(value_type, "from_data"):
-            raise NotImplementedError()
+            raise NotImplementedError(f"The type {value_type} does not have the 'from_data(cls, data: dict | Self)' class method implemented.")
         value = value_type.from_data(value)
         if not type_check(value):
             raise DataParseError(for_cls, f"Type check failure for the field {field_name}")
@@ -660,3 +665,36 @@ def parse_message(data: Any) -> Any:
         raise DataParseError(GenericMessage, f"Type '{data["type"]}' is not a message type.")
     message_type: Type[Message] = message_type
     return message_type.from_data(data)
+
+
+class LevelNames(str, Enum):
+    critical = 50
+    fatal = 50
+    error = 40
+    warning = 30
+    warn = 30
+    info = 20
+    debug = 10
+    notset = 0
+
+
+async def connection_handler(connection: ServerConnection) -> None:
+    raise NotImplementedError()
+
+
+async def main(
+    host: str,
+    port: int,
+    log_level: LevelNames = LevelNames.notset
+) -> None:
+    if log_level != LevelNames.notset:
+        logger.setLevel(log_level.value)
+
+    async with serve(connection_handler, host, port, logger=logger) as server:
+        serve_task: Task = create_task(server.serve_forever())
+        await serve_task
+
+
+if __name__ == "__main__":
+    cmd: Command = Command.create(main)
+    run(cmd(argv[1:]))
