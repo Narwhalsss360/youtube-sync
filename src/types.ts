@@ -1001,7 +1001,7 @@ export function isKeepAliveMessage(object: any | null | undefined): object is Ke
     return false;
   }
 
-  if (object.type !== MessageTypes.RequestVideoInfo) {
+  if (object.type !== MessageTypes.KeepAlive) {
     return false;
   }
 
