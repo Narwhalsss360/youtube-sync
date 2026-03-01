@@ -739,17 +739,6 @@ def parse_message(data: Any) -> ReceivableMessage:
     return cls.from_data(cast(dict[str, Any], data))
 
 
-class LevelNames(str, Enum):
-    critical = 50
-    fatal = 50
-    error = 40
-    warning = 30
-    warn = 30
-    info = 20
-    debug = 10
-    notset = 0
-
-
 connected_users_by_uuid: dict[str, User] = {}
 
 
@@ -932,6 +921,18 @@ def heartbeat(server: Server) -> None:
         server.closed_waiter.add_done_callback(lambda _: delay_task.cancel())
         delay_task.add_done_callback(lambda _: heartbeat(server))
     gather(*tasks).add_done_callback(tasks_done)
+
+
+class LevelNames(int, Enum):
+    critical = 50
+    fatal = 50
+    error = 40
+    warning = 30
+    warn = 30
+    info = 20
+    debug = 10
+    notset = 0
+
 
 async def main(
     host: str,
