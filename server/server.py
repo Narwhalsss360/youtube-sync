@@ -953,10 +953,10 @@ async def main(
 
 if __name__ == "__main__":
     cmd: Command = Command.create(main) # type: ignore
-    if False:
+    if False: # Set to False for debugging with same host, port and log level.
         if len(argv) == 1:
             print(cmd.extended_command_help())
         else:
             run(cmd(argv[1:]))
     else:
-        run(main("localhost", 8823))
+        run(main("localhost", 8823, LevelNames.debug))
