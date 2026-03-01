@@ -494,10 +494,6 @@ function processRuntimeMessage(
       ).packagedServiceState);
       break;
     }
-    case MessageTypes.PortAvailable: {
-      /**Handled by background service worker, to be ignored. */
-      break;
-    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");

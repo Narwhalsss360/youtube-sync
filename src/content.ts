@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, PortAvailableMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: () => boolean,
@@ -424,36 +424,18 @@ function processRuntimeMessage(
 }
 
 function main() {
-  let isFirstUpdate: boolean = true;
   detectVideoInfo(videoInfo => {
-    if (isFirstUpdate) {
-      isFirstUpdate = false;
-      const portAvailableMessage: PortAvailableMessage = {
-        type: MessageTypes.PortAvailable
-      };
-      browser.runtime.sendMessage(portAvailableMessage);
-    }
     moduleState.videoInfoCache = videoInfo;
     sendVideoInfo();
     console.log(videoInfo)
   });
 
+  waitForVideoElement().then(video => registerVideoElementEvents(video));
   browser.runtime.onMessage.addListener(processRuntimeMessage);
-  browser.runtime.onConnect.addListener(port => {
-    if (port.name !== "active-tab") {
-      throw Error(`Received unknown port connect request: ${port.name}`);
-    }
-    port.onMessage.addListener(processPortMessage);
-    moduleState.backgroundServicePort = port;
-    sendVideoInfo();
-    waitForVideoElement().then(video => registerVideoElementEvents(video));
-    console.log("Is active YouTube Sync tab.");
-    port.onDisconnect.addListener(() => {
-      waitForVideoElement().then(video => removeVideoElementEvents(video));
-      moduleState.backgroundServicePort = null;
-      console.log("Is no longer active YouTube Sync tab.");
-    });
-  });
+  const port = browser.runtime.connect(undefined, { name: "content-tab" });
+  port.onMessage.addListener(processPortMessage);
+  moduleState.backgroundServicePort = port;
+  sendVideoInfo();
 
   (globalThis as any).contentModule = Object.freeze({
     moduleState,

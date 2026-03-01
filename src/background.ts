@@ -27,7 +27,6 @@ import {
   UserDisconnectMessage,
   isUserDisconnectMessage,
   detectUserUpdates,
-  isPortAvailableMessage,
   isUsersMessage,
   FollowMessage,
   isFollowMessage,
@@ -48,21 +47,19 @@ const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
 const serviceState: {
   user: User,
   users: Array<User>,
-  activeTab: browser.tabs.Tab | null,
   activeTabPort: browser.runtime.Port | null,
   serverConnection: WebSocket | null,
   reconnectToTab: number | null,
   pendingServerRequests: Array<GenericMessage>,
-  availableTabIds: Set<number>
+  contentPorts: Array<browser.runtime.Port>
 } = {
   user: structuredClone(userDefaults),
   users: [],
-  activeTab: null,
   activeTabPort: null,
   serverConnection: null,
   reconnectToTab: null,
   pendingServerRequests: [],
-  availableTabIds: new Set()
+  contentPorts: []
 };
 
 function getTabId(tab: browser.tabs.Tab): number {
@@ -76,10 +73,10 @@ function packageServiceState(): PackagedServiceState {
   return {
     user: serviceState.user,
     users: serviceState.users,
-    activeTabId: serviceState.activeTab?.id ?? null,
+    activeTabId: serviceState.activeTabPort?.sender?.tab?.id ?? null,
     serverAddress: serviceState.serverConnection?.url ?? null,
     pendingServerRequests: serviceState.pendingServerRequests,
-    availableTabIds: Array.from(serviceState.availableTabIds)
+    availableTabIds: Array.from(serviceState.contentPorts).map(port => wellDefined(port.sender?.tab?.id, new Error("Every content port must have a tab id")))
   };
 }
 
@@ -433,119 +430,44 @@ function processRuntimeMessage(
         message
       );
 
-      if (serviceState.activeTab?.id === setActiveTabMessage.tabId) {
+      if (serviceState.activeTabPort?.sender?.tab?.id === setActiveTabMessage.tabId) {
+        break;
+      }
+
+      if (setActiveTabMessage.tabId === null) {
+        if (serviceState.activeTabPort !== null) {
+          serviceState.activeTabPort.onMessage.removeListener(processActiveTabMessage);
+          serviceState.activeTabPort = null;
+        }
+        break;
+      }
+
+      if (setActiveTabMessage.tabId === browser.tabs.TAB_ID_NONE) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "This tab does not host content.",
+          sender: "Background Service Worker"
+        };
+        sendResponse(errorMessage);
         return;
       }
 
-      return (async () => {
-        let tab = undefined;
-        if (setActiveTabMessage.tabId) {
-          try {
-            tab = await browser.tabs.get(setActiveTabMessage.tabId);
-          } catch (err) {
-            console.error(`Tab ${setActiveTabMessage.tabId} does not exist.`);
-            return;
-          }
-        }
+      const port = serviceState.contentPorts.find(port => port.sender?.tab?.id === setActiveTabMessage.tabId);
+      if (port === undefined) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: `Tab ${setActiveTabMessage.tabId} is not available.`,
+          sender: "Background Service Worker"
+        };
+        sendResponse(errorMessage);
+        return;
+      }
 
-        if (serviceState.activeTab) {
-          serviceState.activeTabPort = serviceState.activeTabPort as browser.runtime.Port;
-          serviceState.activeTabPort.disconnect();
-        }
-
-        if (tab === undefined) {
-          serviceState.activeTab = null;
-          serviceState.activeTabPort = null;
-          broadcastPackagedStateToRuntime();
-          return;
-        }
-        setActiveTabMessage.tabId = wellDefined(
-          setActiveTabMessage.tabId,
-          Error("tab === undefined is used as a sentinel value to represent whether setActiveTabMessage.tabId was null")
-        );
-
-        if (tab.url === undefined) {
-          console.error("Invalid tab.");
-          return;
-        }
-
-        if (new URL(tab.url).origin !== "https://www.youtube.com") {
-          const errorMessage: ErrorMessage = {
-            type: MessageTypes.Error,
-            message: "Cannot set as active tab, not a youtube tab.",
-            sender: "Background Service Worker"
-          };
-          sendResponse(errorMessage);
-          return;
-        }
-
-        if (tab.status !== "complete") {
-          const errorMessage: ErrorMessage = {
-            type: MessageTypes.Error,
-            message: "Cannot set as active tab, loading not complete.",
-            sender: "Background Service Worker"
-          };
-          sendResponse(errorMessage);
-          return;
-        }
-
-        if (tab.id === browser.tabs.TAB_ID_NONE) {
-          const errorMessage: ErrorMessage = {
-            type: MessageTypes.Error,
-            message: "Cannot set as active tab, this tab does not host content.",
-            sender: "Background Service Worker"
-          };
-          sendResponse(errorMessage);
-          return;
-        }
-
-        if (!serviceState.availableTabIds.has(setActiveTabMessage.tabId)) {
-          const errorMessage: ErrorMessage = {
-            type: MessageTypes.Error,
-            message: "Cannot set as active tab, this tab does not host content.",
-            sender: "Background Service Worker"
-          };
-          sendResponse(errorMessage);
-          return;
-        }
-
-        serviceState.reconnectToTab = null;
-        serviceState.activeTab = tab;
-        serviceState.activeTabPort = browser.tabs.connect(getTabId(tab), { name: "active-tab" });
-        serviceState.activeTabPort.onMessage.addListener(processActiveTabMessage);
-        serviceState.activeTabPort.onDisconnect.addListener(() => {
-          browser.tabs.get(getTabId(tab)).then(tab => {
-            if (tab.url === undefined) {
-              return;
-            }
-
-            if (new URL(tab.url).origin !== "https://www.youtube.com") {
-              console.log("Active tab closed");
-              return;
-            }
-
-            console.log("Will reconnect to tab soon...");
-            serviceState.reconnectToTab = getTabId(tab);
-            const TIMEOUT = 30 * 1000;
-            const timeoutIntervalId = setInterval(() => {
-              clearInterval(timeoutIntervalId);
-              if (serviceState.reconnectToTab === null) {
-                return;
-              }
-              serviceState.reconnectToTab = null;
-              console.error("Did not reconnect to tab, timed out.");
-            }, TIMEOUT);
-          }).catch(err => {
-            console.log(`Active tab closed: ${err}`);
-          });
-          serviceState.activeTab = null;
-          serviceState.activeTabPort = null;
-          serviceState.user.videoInfo = null;
-          broadcastPackagedStateToRuntime();
-          notifyServerOfVideoInfo();
-        });
-        broadcastPackagedStateToRuntime();
-      })();
+      port.onMessage.addListener(processActiveTabMessage);
+      serviceState.activeTabPort = port;
+      broadcastPackagedStateToRuntime();
+      notifyServerOfVideoInfo();
+      break;
     }
     case MessageTypes.ConnectToServerAs: {
       if (serviceState.serverConnection !== null) {
@@ -635,42 +557,6 @@ function processRuntimeMessage(
         return
       }
       serviceState.serverConnection.close();
-      break;
-    }
-    case MessageTypes.PortAvailable: {
-      wellDefinedMessage(isPortAvailableMessage, MessageTypes.PortAvailable, message);
-      if (sender.tab?.id === undefined) {
-        return;
-      }
-
-      serviceState.availableTabIds.add(sender.tab.id);
-      broadcastPackagedStateToRuntime();
-
-      if (serviceState.reconnectToTab === null) {
-        return;
-      }
-
-      if (sender.tab === undefined) {
-        console.warn(`The following console warning message is a sender which is not a tab that presented as a tab with a port available:`);
-        console.warn(sender);
-        return;
-      }
-
-      if (sender.tab.id === undefined) {
-        return;
-      }
-
-      if (sender.tab.id !== serviceState.reconnectToTab) {
-        return;
-      }
-
-      const setActiveTabMessage: SetActiveTabMessage = {
-        type: MessageTypes.SetActiveTab,
-        tabId: serviceState.reconnectToTab
-      };
-      serviceState.reconnectToTab = null;
-      console.log(`Reconnecting to tab...`);
-      processRuntimeMessage(setActiveTabMessage, sender, sendResponse);
       break;
     }
     case MessageTypes.Follow: {
@@ -789,40 +675,24 @@ function processRuntimeMessage(
   }
 }
 
-function tabUpdated(tabId: number, changeInfo: any, tab: browser.tabs.Tab): void {
-  if (!serviceState.availableTabIds.has(tabId)) {
-    return;
+function portConnect(port: browser.runtime.Port) {
+  if (port.name !== "content-tab") {
+    throw new Error(`Port with unknown name (${port.name}) connect request.`);
   }
 
-  function isStillAvailable() {
-    if (tab.status !== "complete") {
-      return false;
-    }
-
-    if (tab.url === undefined) {
-      return false;
-    }
-
-    if (new URL(tab.url).origin !== "https://www.youtube.com") {
-      return false;
-    }
-
-    return true;
+  if (port.sender?.tab?.id === undefined) {
+    throw new Error(`Non-tab port connect request.`);
   }
 
-  if (isStillAvailable()) {
-    return;
-  }
-
-  serviceState.availableTabIds.delete(tabId);
-  broadcastPackagedStateToRuntime();
-}
-
-function tabRemoved(tabId: number, removeInfo: any): void {
-  if (serviceState.availableTabIds.has(tabId)) {
-    serviceState.availableTabIds.delete(tabId);
+ port.onDisconnect.addListener(disconnected => {
+  serviceState.contentPorts = serviceState.contentPorts.filter(p => p !== disconnected);
+  if (serviceState.activeTabPort === disconnected) {
+    serviceState.activeTabPort = null;
     broadcastPackagedStateToRuntime();
+    notifyServerOfVideoInfo();
   }
+ });
+ serviceState.contentPorts.push(port);
 }
 
 async function setCurrentTabAsActiveTab() {
@@ -861,8 +731,7 @@ async function setCurrentTabAsActiveTab() {
 
 function main() {
   browser.runtime.onMessage.addListener(processRuntimeMessage);
-  browser.tabs.onUpdated.addListener(tabUpdated);
-  browser.tabs.onRemoved.addListener(tabRemoved);
+  browser.runtime.onConnect.addListener(portConnect);
 
   /*
   serviceState.user.uuid = "test-uuid";

@@ -496,7 +496,6 @@ export enum MessageTypes {
   ServerHandshake = "server-handshake",
   User = "user",
   UserDisconnect = "user-disconnect",
-  PortAvailable = "port-available",
   Users = "users",
   Follow = "follow",
   StopFollowing = "stop-following",
@@ -839,26 +838,6 @@ export function isUserDisconnectMessage(object: any | null | undefined): object 
   return true;
 };
 
-export interface PortAvailableMessage extends GenericMessage {
-  type: MessageTypes.PortAvailable
-};
-
-export function isPortAvailableMessage(object: any | null | undefined): object is PortAvailableMessage {
-  if (typeof object !== "object") {
-    return false;
-  }
-
-  if (object === null) {
-    return false;
-  }
-
-  if (object.type !== MessageTypes.PortAvailable) {
-    return false;
-  }
-
-  return true;
-}
-
 export interface UsersMessage extends GenericMessage {
   type: MessageTypes.Users,
   users: Array<User>
@@ -1022,7 +1001,6 @@ export type Message = (
   ServerHandshakeMessage |
   UserMessage |
   UserDisconnectMessage |
-  PortAvailableMessage |
   UsersMessage |
   FollowMessage |
   StopFollowingMessage |
