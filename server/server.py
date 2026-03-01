@@ -71,7 +71,7 @@ def ensure_constructed_rethrow_type_or_value_error[T](
         if (from_data := getattr(value_type, "from_data")) is None and not callable(from_data):
             raise NotImplementedError(f"The type {value_type} does not have the 'from_data(cls, data: dict | Self)' class method implemented.")
 
-        value = from_data(for_cls, value)
+        value = from_data(value)
         if not type_check(value):
             raise DataParseError(for_cls, f"Type check failure for the field {field_name}")
         return value
@@ -713,14 +713,13 @@ type ReceivableMessage = (
 receiveable_message_classes: tuple[Type[ReceivableMessage]] = get_args(ReceivableMessage.__value__)
 
 def parse_message(data: Any) -> ReceivableMessage:
-    if not isinstance(data, dict):
-        raise DataParseError(GenericMessage, "Data must be a dictionary/JSON object.")
-    elif isinstance(data, str):
+    if isinstance(data, str):
         try:
             return parse_message(loads(data))
         except JSONDecodeError as e:
             raise DataParseError(GenericMessage, *e.args)
-    assert isinstance(data, dict)
+    if not isinstance(data, dict):
+        raise DataParseError(GenericMessage, "Data must be a dictionary/JSON object.")
 
     if "type" not in data or not isinstance(data["type"], str):
         raise DataParseError(GenericMessage, f"Message type required for every message.")
