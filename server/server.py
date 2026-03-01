@@ -290,6 +290,7 @@ class User:
     uuid: str = field(hash=True)
     username: str = field(hash=False)
     hostingOptions: UserHostingOptions = field(hash=False)
+    followingOptions: UserFollowingOptions = field(hash=False)
     reconnectToServerOnLoss: bool = field(hash=False)
     connectionQuality: ConnectionQuality | None = field(hash=None)
     videoInfo: VideoInfo | None = field(hash=False)
@@ -337,6 +338,13 @@ class User:
             parsed.hostingOptions,
             False
         ))
+        parsed.followingOptions = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            UserFollowingOptions,
+            "followingOptions",
+            parsed.followingOptions,
+            False
+        ))
         parsed.reconnectToServerOnLoss = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             bool,
@@ -377,6 +385,19 @@ class User:
             ))
 
         return parsed
+
+    def update(self, new_data: User) -> User:
+        if self.uuid != new_data.uuid:
+            raise ValueError("Cannot update data, uuid mismatch")
+
+        self.videoInfo = new_data.videoInfo
+        self.followingUUID = new_data.followingUUID
+        self.followerUUIDs = new_data.followerUUIDs
+        self.hostingOptions = new_data.hostingOptions
+        self.followingOptions = new_data.followingOptions
+        self.reconnectToServerOnLoss = new_data.reconnectToServerOnLoss
+        return self
+
 
 
 class MessageTypes(str, Enum):
