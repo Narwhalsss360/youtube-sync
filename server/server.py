@@ -754,7 +754,13 @@ connected_users_by_uuid: dict[str, User] = {}
 
 
 def update_following_info() -> None:
-    ...
+    for user in connected_users_by_uuid.values():
+        user.followerUUIDs = []
+
+    for user in connected_users_by_uuid.values():
+        user.waiting_for_acknowledge.append(UsersMessage([]))
+        if user.followingUUID is not None:
+            connected_users_by_uuid[user.followingUUID].followerUUIDs.append(user.uuid)
 
 
 async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
@@ -808,7 +814,42 @@ async def handle_disconnect(user: User) -> None:
 
 
 async def handle_non_clerical_message(this_user: User, message: ReceivableMessage) -> None:
-    ...
+    if isinstance(message, VideoInfoMessage):
+        log_level: int = logging.DEBUG if getattr(this_user.videoInfo, "videoId", None) == getattr(message, "videoId", None) else logging.INFO
+        this_user.videoInfo = message.videoInfo
+        await broadcast(message, this_user, log_level)
+        return
+
+    if isinstance(message, UserMessage):
+        this_user.update(message.user)
+        await broadcast(message, this_user, logging.INFO)
+        return
+
+    if isinstance(message, FollowMessage):
+        if this_user.followingUUID is not None:
+            await send_to(this_user, ErrorMessage(f"Already following: {this_user.followingUUID}", "Server"), logging.ERROR)
+            return
+        if this_user.uuid == message.followingUUID:
+            await send_to(this_user, ErrorMessage("Cannot follow self.", "Server"), logging.ERROR)
+            return
+        if next(filter(lambda u: u.uuid == message.followingUUID, connected_users_by_uuid.values()), None) is None:
+            await send_to(this_user, ErrorMessage(f"User uuid {message.followingUUID} does not exist.", "Server"), logging.ERROR)
+            return
+        this_user.followingUUID = message.followingUUID
+        update_following_info()
+        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO)
+        return
+
+    if isinstance(message, StopFollowingMessage):
+        if this_user.followingUUID != message.followingUUID:
+            await send_to(this_user, ErrorMessage(f"Cannot stop following {message.followingUUID} if following {this_user.uuid}", "Server"), logging.ERROR)
+            return
+        this_user.followingUUID = None
+        update_following_info()
+        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO)
+        return
+
+    logger.error(f"Dropped message from {this_user}: {message}")
 
 
 async def connection_handler(connection: ServerConnection) -> None:
@@ -825,7 +866,8 @@ async def connection_handler(connection: ServerConnection) -> None:
 
             if this_user is None:
                 if not isinstance(message, ServerHandshakeRequestMessage):
-                    ... # This must be first message
+                    await send_to(connection, ErrorMessage(f"First message must be '{ServerHandshakeRequestMessage.MESSAGE_TYPE_VALUE}'.", "Server"), logging.ERROR)
+                    await connection.close()
                     return
 
                 while (uuid := uuid4().hex) in connected_users_by_uuid:
@@ -834,8 +876,9 @@ async def connection_handler(connection: ServerConnection) -> None:
                 this_user.uuid = uuid
                 this_user.connection = connection
                 this_user.last_communication_time = time.time()
-                this_user.waiting_for_acknowledge.append(message)
-                await send_to(this_user, ServerHandshakeMessage(uuid, list(connected_users_by_uuid.values())), logging.INFO)
+                server_handshake_message: ServerHandshakeMessage = ServerHandshakeMessage(uuid, list(connected_users_by_uuid.values()))
+                this_user.waiting_for_acknowledge.append(server_handshake_message)
+                await send_to(this_user, server_handshake_message, logging.INFO)
                 continue
 
             this_user.last_communication_time = time.time()
@@ -885,7 +928,10 @@ async def main(
 
 if __name__ == "__main__":
     cmd: Command = Command.create(main) # type: ignore
-    if len(argv) == 1:
-        print(cmd.extended_command_help())
+    if False:
+        if len(argv) == 1:
+            print(cmd.extended_command_help())
+        else:
+            run(cmd(argv[1:]))
     else:
-        run(cmd(argv[1:]))
+        run(main("localhost", 8823))
