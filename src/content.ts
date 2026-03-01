@@ -1,15 +1,15 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isAcknowledgeMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
-  isActiveTab: () => boolean,
+  isActiveTab: boolean,
   videoInfoCache: VideoInfo | null
   backgroundServicePort: browser.runtime.Port | null,
   packagedServiceState: PackagedServiceState | null,
   maxDeviation: number,
 } = {
-  isActiveTab: () => moduleState.backgroundServicePort !== null,
+  isActiveTab: false,
   videoInfoCache: null,
   backgroundServicePort: null,
   packagedServiceState: null,
@@ -181,7 +181,7 @@ let ensureVideoInfoIsSentIntervalId: ReturnType<typeof setInterval> | null = nul
 const ENSURE_VIDEO_INFO_SENT_INTERVAL: number = 10;
 
 function sendVideoInfo() {
-  if (!moduleState.isActiveTab() || moduleState.backgroundServicePort === null) {
+  if (!moduleState.isActiveTab || moduleState.backgroundServicePort === null) {
     if (ensureVideoInfoIsSentIntervalId === null) {
       ensureVideoInfoIsSentIntervalId = setInterval(() => {
         sendVideoInfo();
@@ -378,6 +378,25 @@ function processPortMessage(
         moduleState.videoInfoCache.playbackInfo = getPlaybackInfo(video);
       }
       sendVideoInfo();
+      break;
+    }
+    case MessageTypes.SetActiveTab: {
+      const setActiveTabMessage: SetActiveTabMessage = wellDefinedMessage(isSetActiveTabMessage, MessageTypes.SetActiveTab, message);
+      if (setActiveTabMessage.tabId === null) {
+        if (!moduleState.isActiveTab) {
+          throw new Error("Can only be unset as active tab if was already active tab.");
+        }
+        moduleState.isActiveTab = false;
+        waitForVideoElement().then(video => removeVideoElementEvents(video));
+        console.log("Is no longer active YouTube Sync tab.");
+      } else {
+        if (moduleState.isActiveTab) {
+          throw new Error("Already set as active tab.");
+        }
+        moduleState.isActiveTab = true;
+        console.log("Is active YouTube Sync tab.");
+        waitForVideoElement().then(video => registerVideoElementEvents(video));
+      }
       break;
     }
     default: {

@@ -62,13 +62,6 @@ const serviceState: {
   contentPorts: []
 };
 
-function getTabId(tab: browser.tabs.Tab): number {
-  if (!tab.id) {
-    throw Error("Tab does not have a ID.");
-  }
-  return tab.id;
-}
-
 function packageServiceState(): PackagedServiceState {
   return {
     user: serviceState.user,
@@ -437,7 +430,12 @@ function processRuntimeMessage(
       if (setActiveTabMessage.tabId === null) {
         if (serviceState.activeTabPort !== null) {
           serviceState.activeTabPort.onMessage.removeListener(processActiveTabMessage);
+          serviceState.activeTabPort.postMessage(setActiveTabMessage);
           serviceState.activeTabPort = null;
+          serviceState.user.videoInfo = null;
+          console.log("Active tab unset");
+          broadcastPackagedStateToRuntime();
+          notifyServerOfVideoInfo();
         }
         break;
       }
@@ -465,6 +463,8 @@ function processRuntimeMessage(
 
       port.onMessage.addListener(processActiveTabMessage);
       serviceState.activeTabPort = port;
+      console.log(`Active tab set: ${wellDefined(port.sender?.tab?.id, new Error("Every content port must have a tab id."))}`);
+      port.postMessage(setActiveTabMessage);
       broadcastPackagedStateToRuntime();
       notifyServerOfVideoInfo();
       break;
@@ -683,15 +683,59 @@ function portConnect(port: browser.runtime.Port) {
   if (port.sender?.tab?.id === undefined) {
     throw new Error(`Non-tab port connect request.`);
   }
+  const tabId: number = port.sender.tab.id;
 
- port.onDisconnect.addListener(disconnected => {
-  serviceState.contentPorts = serviceState.contentPorts.filter(p => p !== disconnected);
-  if (serviceState.activeTabPort === disconnected) {
-    serviceState.activeTabPort = null;
+  if (tabId === serviceState.reconnectToTab) {
+    serviceState.reconnectToTab = null;
+    port.onMessage.addListener(processActiveTabMessage);
+    serviceState.activeTabPort = port;
+    const setActiveTabMessage: SetActiveTabMessage = {
+      type: MessageTypes.SetActiveTab,
+      tabId: tabId
+    };
+    port.postMessage(setActiveTabMessage);
+    console.log(`Reconnecting to: ${tabId}...`);
     broadcastPackagedStateToRuntime();
     notifyServerOfVideoInfo();
   }
- });
+
+  port.onDisconnect.addListener(disconnected => {
+    serviceState.contentPorts = serviceState.contentPorts.filter(p => p !== disconnected);
+    if (serviceState.activeTabPort !== disconnected) {
+      return;
+    }
+
+    serviceState.activeTabPort.onMessage.removeListener(processActiveTabMessage);
+    serviceState.activeTabPort = null;
+    serviceState.user.videoInfo = null;
+    broadcastPackagedStateToRuntime();
+    notifyServerOfVideoInfo();
+    browser.tabs.get(tabId).then(tab => {
+      if (tab.status !== "loading") {
+        return;
+      }
+
+      if (tab.url === undefined) {
+        return;
+      }
+
+      if (new URL(tab.url).origin !== "https://www.youtube.com") {
+        console.log("Active tab closed.");
+        return;
+      }
+
+      const TIMEOUT_INTERVAL = 120000;
+      console.log(`Will reconnect to ${tabId}...`);
+      serviceState.reconnectToTab = tabId;
+      setTimeout(() => {
+        if (serviceState.reconnectToTab === null) {
+          return;
+        }
+        serviceState.reconnectToTab = null;
+        console.log(`Failed to reconnect to tab ${serviceState.reconnectToTab}`);
+      }, TIMEOUT_INTERVAL)
+    });
+  });
  serviceState.contentPorts.push(port);
 }
 
