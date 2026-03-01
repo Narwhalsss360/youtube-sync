@@ -2,13 +2,14 @@ from __future__ import annotations
 from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass, asdict
-from websockets.asyncio.server import serve, ServerConnection
+from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
 from sys import argv
 from npycli import Command # type: ignore
-from asyncio import run, Task, create_task, gather
+from asyncio import run, Task, create_task, gather, Future
 from uuid import uuid4
+import asyncio
 import logging
 import time
 
@@ -912,6 +913,26 @@ async def connection_handler(connection: ServerConnection) -> None:
             await handle_disconnect(this_user)
 
 
+HEARTBEAT_INTERVAL: float = 0.1
+KEEP_ALIVE_INTERVAL: float = 20
+
+
+def heartbeat(server: Server) -> None:
+    if not server.is_serving():
+        return
+
+    tasks: list[Task[None]] = []
+    for user in connected_users_by_uuid.values():
+        if time.time() - user.last_communication_time >= KEEP_ALIVE_INTERVAL:
+            tasks.append(create_task(send_to(user, KeepAliveMessage(), logging.DEBUG)))
+
+
+    def tasks_done(future: Future[list[None]]) -> None:
+        delay_task: Task[None] = create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
+        server.closed_waiter.add_done_callback(lambda _: delay_task.cancel())
+        delay_task.add_done_callback(lambda _: heartbeat(server))
+    gather(*tasks).add_done_callback(tasks_done)
+
 async def main(
     host: str,
     port: int,
@@ -922,6 +943,11 @@ async def main(
 
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
+
+        initial_heartbeat_delay: Task[None] = create_task(asyncio.sleep(3))
+        server.closed_waiter.add_done_callback(lambda _: initial_heartbeat_delay.cancel())
+        initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
+
         await serve_task
 
 
