@@ -178,10 +178,14 @@ function constructUserStatusInnerHTML(user: User): string {
   let innerHTML = "";
 
   if (user.followerUUIDs.length > 0) {
+    const followerUsernames: Array<string> = user.followerUUIDs.map(uuid => wellDefined(
+      popupState.usersWithSelf().find(user => user.uuid === uuid),
+      new Error("Bad state, every followerUUID must exist")
+    ).username);
     innerHTML = (
       `<details id="${userElementIdPrefix(user.uuid, "followed-by-details")}">
         <summary>Followed by &#708;</summary>
-        <div class="text-div">${user.followerUUIDs.map(uuid => wellDefined(popupState.packagedServiceState.users.find(user => user.uuid === uuid), Error("Bad state")).username).join(", ")}</div>
+        <div class="text-div">${followerUsernames.join(", ")}</div>
       </details>`
     );
   }
