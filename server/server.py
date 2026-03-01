@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
 from enum import Enum
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import dataclass, field, is_dataclass, asdict
 from websockets.asyncio.server import serve, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
-from json import loads, JSONDecodeError
+from json import loads, JSONDecodeError, dumps
 from sys import argv
 from npycli import Command # type: ignore
-from asyncio import run, Task, create_task
+from asyncio import run, Task, create_task, gather
 from uuid import uuid4
 import logging
 import time
@@ -565,6 +565,13 @@ class UsersMessage:
 
 
 @dataclass
+class UserDisconnectMessage:
+    MESSAGE_TYPE_VALUE = MessageTypes.UserDisconnect
+    uuid: str
+    type: str = field(default=MESSAGE_TYPE_VALUE)
+
+
+@dataclass
 class FollowMessage:
     MESSAGE_TYPE_VALUE = MessageTypes.Follow.value
     followingUUID: str
@@ -664,6 +671,7 @@ type Message = (
     VideoInfoMessage |
     UserMessage |
     UsersMessage |
+    UserDisconnectMessage |
     FollowMessage |
     StopFollowingMessage |
     RequestVideoInfoMessage |
@@ -724,16 +732,58 @@ class LevelNames(str, Enum):
 connected_users_by_uuid: dict[str, User] = {}
 
 
-async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
+def update_following_info() -> None:
     ...
+
+
+async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
+    if log_level != logging.NOTSET:
+        logger.log(log_level, f"$<- {message}")
+
+    if isinstance(user, User):
+        await user.connection.send(dumps(asdict(message)))
+        user.last_communication_time = time.time()
+    else:
+        await user.send(dumps(asdict(message)))
 
 
 async def broadcast(message: Message, except_for: User | None, log_level: int) -> None:
-    ...
+    broadcast_to: list[User] = list(filter(lambda u: u != except_for, connected_users_by_uuid.values()) if except_for is not None else connected_users_by_uuid.values())
+    send_results = gather(*[
+        send_to(user, message, logging.NOTSET)
+        for user in broadcast_to
+    ])
+
+    if log_level != logging.NOTSET:
+        logger.log(log_level, f"BROADCAST({len(broadcast_to)} user(s)) <- {message}")
+
+    await send_results
+    for user, result in zip(broadcast_to, send_results):
+        if isinstance(result, ConnectionClosedOK):
+            await handle_disconnect(user)
+            continue
+
+        if isinstance(result, ConnectionClosed):
+            logger.error(result)
+            await handle_disconnect(user)
+            continue
+
+        user.last_communication_time = time.time()
 
 
 async def handle_disconnect(user: User) -> None:
-    ...
+    if user.uuid in connected_users_by_uuid:
+        del connected_users_by_uuid[user.uuid]
+
+    logger.info(f"User {user} disconnect is being handled.")
+    if user.connection:
+        await user.connection.close()
+
+    if user.followingUUID or user.followerUUIDs:
+        update_following_info()
+        await broadcast(UsersMessage(users=list(connected_users_by_uuid.values())), None, logging.DEBUG)
+    else:
+        await broadcast(UserDisconnectMessage(user.uuid), None, logging.DEBUG)
 
 
 async def handle_non_clerical_message(this_user: User, message: ReceivableMessage) -> None:
