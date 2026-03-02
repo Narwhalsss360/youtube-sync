@@ -399,13 +399,14 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
   }
 
   if (updates.includes("followerUUIDs") || updates.includes("followingUUID")) {
-    wellDefined<HTMLDivElement>(
-      asType(
-        (element: any) => element instanceof HTMLDivElement,
-        document.getElementById(userElementIdPrefix(user.uuid, "status"))
-      ),
-      constructBadDOMError("user status.")
-    ).innerHTML = constructUserStatusInnerHTML(user);
+    const status = asType(
+      (element: any) => element instanceof HTMLDivElement,
+      document.getElementById(userElementIdPrefix(user.uuid, "status"))
+    )
+
+    if (status) {
+      status.innerHTML = constructUserStatusInnerHTML(user);
+    }
   }
 
   ensureEventsAreRegistered(div, user);
