@@ -1,14 +1,15 @@
 from __future__ import annotations
-from typing import TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
+from typing import TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass, asdict
 from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
-from sys import argv
+from sys import argv, stdout
 from npycli import Command # type: ignore
 from asyncio import run, Task, create_task, gather, Future
 from uuid import uuid4
+from pathlib import Path
 import asyncio
 import logging
 import time
@@ -937,16 +938,24 @@ class LevelNames(int, Enum):
 async def main(
     host: str,
     port: int,
-    log_level: LevelNames = LevelNames.notset
+    log_level: LevelNames = LevelNames.notset,
+    log_file: Optional[Path] = None
 ) -> None:
     log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
-    logging.basicConfig(level=log_level)
+    log_file = log_file or Path(__file__).parent.joinpath(Path("server.log"))
     logger.setLevel(log_level.value)
+
+    stdout_handler: logging.StreamHandler[TextIO] = logging.StreamHandler(stdout)
+    stdout_handler.setLevel(log_level)
+    logger.addHandler(stdout_handler)
+
+    file_handler: logging.FileHandler = logging.FileHandler(str(log_file))
+    file_handler.setLevel(log_level)
+    logger.addHandler(file_handler)
 
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
 
-        logger.info("Serving!")
         initial_heartbeat_delay: Task[None] = create_task(asyncio.sleep(3))
         server.closed_waiter.add_done_callback(lambda _: initial_heartbeat_delay.cancel())
         initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
@@ -955,11 +964,14 @@ async def main(
 
 
 if __name__ == "__main__":
-    cmd: Command = Command.create(main) # type: ignore
-    if True: # Set to False for debugging with same host, port and log level.
-        if len(argv) == 1:
-            print(cmd.extended_command_help())
+    try:
+        cmd: Command = Command.create(main) # type: ignore
+        if False: # Set to False for debugging with same host, port and log level.
+            if len(argv) == 1:
+                print(cmd.extended_command_help())
+            else:
+                run(cmd(argv[1:]))
         else:
-            run(cmd(argv[1:]))
-    else:
-        run(main("localhost", 8823, LevelNames.debug))
+            run(main("localhost", 8823, LevelNames.debug))
+    except KeyboardInterrupt:
+        print("\n^C")
