@@ -939,12 +939,14 @@ async def main(
     port: int,
     log_level: LevelNames = LevelNames.notset
 ) -> None:
-    if log_level != LevelNames.notset:
-        logger.setLevel(log_level.value)
+    log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
+    logging.basicConfig(level=log_level)
+    logger.setLevel(log_level.value)
 
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
 
+        logger.info("Serving!")
         initial_heartbeat_delay: Task[None] = create_task(asyncio.sleep(3))
         server.closed_waiter.add_done_callback(lambda _: initial_heartbeat_delay.cancel())
         initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
@@ -954,7 +956,7 @@ async def main(
 
 if __name__ == "__main__":
     cmd: Command = Command.create(main) # type: ignore
-    if False: # Set to False for debugging with same host, port and log level.
+    if True: # Set to False for debugging with same host, port and log level.
         if len(argv) == 1:
             print(cmd.extended_command_help())
         else:
