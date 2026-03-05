@@ -1,0 +1,2 @@
+npycli==0.4.0
+websockets==16.0
