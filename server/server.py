@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast
+from typing import TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast, Annotated
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass, asdict
 from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
 from sys import argv, stdout
-from npycli import Command # type: ignore
+from npycli import Command, DefaultPreview  # type: ignore
 from asyncio import run, Task, create_task, gather, Future
 from uuid import uuid4
 from pathlib import Path
@@ -935,14 +935,17 @@ class LevelNames(int, Enum):
     notset = 0
 
 
+DEFAULT_LOG_PATH: str = "server.log"
+
+
 async def main(
     host: str,
     port: int,
     log_level: LevelNames = LevelNames.notset,
-    log_file: Optional[Path] = None
+    log_file: Annotated[Optional[Path], DefaultPreview(DEFAULT_LOG_PATH)] = None
 ) -> None:
     log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
-    log_file = log_file or Path(__file__).parent.joinpath(Path("server.log"))
+    log_file = log_file or Path(__file__).parent.joinpath(Path(DEFAULT_LOG_PATH))
     logger.setLevel(log_level.value)
 
     stdout_handler: logging.StreamHandler[TextIO] = logging.StreamHandler(stdout)
@@ -963,15 +966,12 @@ async def main(
         await serve_task
 
 
+cmd: Command = Command.create(main, name="server", help="Serve the YouTube Sync server. Specify a host and port, logging level and log file.")  # type: ignore
 if __name__ == "__main__":
     try:
-        cmd: Command = Command.create(main) # type: ignore
-        if False: # Set to False for debugging with same host, port and log level.
-            if len(argv) == 1:
-                print(cmd.extended_command_help())
-            else:
-                run(cmd(argv[1:]))
+        if len(argv) == 1:
+            print(cmd.extended_command_help())
         else:
-            run(main("localhost", 8823, LevelNames.debug))
+            run(cmd(argv[1:]))
     except KeyboardInterrupt:
         print("\n^C")
