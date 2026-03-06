@@ -1,15 +1,27 @@
 from __future__ import annotations
-from typing import TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast, Annotated
+from typing import Literal, TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast, Annotated
 from enum import Enum
 from dataclasses import dataclass, field, is_dataclass, asdict
 from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
-from sys import argv, stdout
-from npycli import Command, DefaultPreview  # type: ignore
-from asyncio import run, Task, create_task, gather, Future
+from sys import argv, stderr, stdout
+from npycli import CLIError, Command, DefaultPreview, CLI, EmptyEntriesError  # pyright: ignore[reportMissingTypeStubs]
+from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, ANSIControl, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION  # pyright: ignore[reportMissingTypeStubs]
+from npycli.parsing import create_enum_parser, create_literal_parser  # pyright: ignore[reportMissingTypeStubs]
+from npycli.parameters import CommandParameter  # pyright: ignore[reportMissingTypeStubs]
+from asyncio import iscoroutine, run, Task, create_task, gather, Future, to_thread, CancelledError
 from uuid import uuid4
 from pathlib import Path
+from logging import Handler, LogRecord
+from shlex import split
+from multiprocessing import Process, Queue
+from os import kill, get_terminal_size
+from signal import SIGINT
+from io import StringIO
+from functools import partial
+import npycli  # pyright: ignore[reportMissingTypeStubs]
+import datetime
 import asyncio
 import logging
 import time
@@ -935,7 +947,181 @@ class LevelNames(int, Enum):
     notset = 0
 
 
+def input_async_process_target(queue: Queue[str]) -> None:
+    with open(0, "r") as stdin:
+        try:
+            queue.put(stdin.readline().rsplit("\n", 1)[0])
+        except KeyboardInterrupt:
+            return
+
+
+async def input_async(prompt: object = None) -> str:
+    user_input_queue: Queue[str] = Queue(1)
+
+    proc: Process = Process(target=input_async_process_target, args=(user_input_queue,), name="server:input", daemon=True)
+    print(prompt, end="", flush=True)
+    proc.start()
+    assert proc.pid is not None
+
+    try:
+        join_task: Task[None] = create_task(to_thread(proc.join))
+        while user_input_queue.empty() and not join_task.done():
+            await asyncio.sleep(0.02)
+    except CancelledError:
+        kill(proc.pid, SIGINT)
+        raise
+
+    if user_input_queue.empty():
+        raise EOFError
+
+    return user_input_queue.get()
+
+
+def print_above(*args: Any, max_columns: int, sep: str | None = " ", file: TextIO = stdout, current_is_empty: bool = False, lines_above: int = 1) -> None:
+    '''
+    Print above the current line.
+    '''
+
+    if lines_above == 0:
+        print(*args, sep=sep)
+        return
+
+    # Use print with file=buffer so this function can be used just like regular print
+    buffer: StringIO = StringIO()
+    print(*args, sep=sep, end="", file=buffer, flush=True)
+    output: str = buffer.getvalue()
+
+    line_count: int = 1
+    line_length: int = 0
+    for c in output:
+        line_length += 1
+        if line_length == max_columns or c == "\n":
+            line_count += 1
+            line_length = 0
+
+    send_ansi(SAVE_CURRENT_CURSOR_POSITION)
+    if current_is_empty:
+        print("\n" * lines_above, file=file, end="")
+        send_ansi(CURSOR_UP.with_args(1 + lines_above), file=file)
+
+    # These ansi control commands may be supplied with arguments
+    print("\n" * (line_count), file=file, end="")
+    send_ansi(CURSOR_UP.with_args(line_count + lines_above), file=file)
+    # This one doesn't have argument, so we just repeat the command
+    send_ansi(INSERT_NEW_LINE, repeat=line_count, file=file)
+
+    # Flush, just in case current cursor position gets moved after output
+    print(output, end='', file=file, flush=True)
+    send_ansi(RESTORE_SAVED_CURSOR_POSITION, file=file)
+    send_ansi(CURSOR_DOWN.with_args(line_count), file=file)
+
+
+class CommandLineInterfaceHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.NOTSET)
+        self.command_result_logging: bool = False
+
+    def emit(self, record: LogRecord) -> None:
+        try:
+            file: TextIO
+            scr: ANSIControl
+            scr_reset: ANSIControl = SELECT_CHARACTER_RENDITION.with_args(SCR_RESET)
+            if record.levelno <= LevelNames.info:
+                scr = SELECT_CHARACTER_RENDITION.with_args(BACKGROUND_BLUE)
+                file = stdout
+            elif record.levelno <= LevelNames.warning:
+                scr = SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_YELLOW)
+                file = stdout
+            else:
+                scr = SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_RED)
+
+                file = stderr
+            msg = (
+                f"{scr}{datetime.datetime.now().isoformat()} {record.levelname}:{scr_reset} "
+                f"{record.getMessage()}"
+            )
+
+            printer = print if self.command_result_logging else partial(print_above, max_columns=get_terminal_size().columns)
+            printer(msg, file=file)
+        except Exception:
+            self.handleError(record)
+
+
+def format_exc(e: BaseException, tabstr: str = "  ", inner_exc_tabs: int = 1) -> str:
+    return (
+        f"{e.__class__.__name__}: {f"\n{tabstr * inner_exc_tabs}".join(str(arg) for arg in e.args)}"
+        f"{format_exc(e.__cause__, tabstr, inner_exc_tabs + 1) if e.__cause__ else ""}"
+    )
+
+
+cli_handler: CommandLineInterfaceHandler = CommandLineInterfaceHandler()
+file_handler: Optional[logging.FileHandler] = None
+cli: CLI = CLI("server")
+
+
+class UserError(Exception):
+    def __init__(self, command: Command, message: str) -> None:
+        super().__init__(message, command)
+        self.command: Command = command
+        self.message: str = message
+
+def get_server() -> Server:
+    if (server := cli.env.get("server", None)) is None:
+        raise NotImplementedError()
+    return server
+
+
+type LogHandlerName = Literal["console", "file"]
+cli.parsers[LogHandlerName] = create_literal_parser(LogHandlerName)
+
+
+@cli.cmd()
+def level(handler_name: LogHandlerName, level: Optional[LevelNames] = None) -> None:
+    assert file_handler is not None
+    handler: Handler = cli_handler if handler_name == "console" else file_handler
+    if level is None:
+        print(LevelNames(handler.level))
+    else:
+        logger.info(f"Log level for {handler_name} changing to {level.name}")
+        handler.setLevel(level.value)
+
+
+@cli.cmd()
+async def quit() -> None:
+    server: Server = get_server()
+    server.close()
+    await server.closed_waiter
+
+
+@cli.cmd("help")
+def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] = None, extended: bool = False) -> None:
+    if extended:
+        command_help, parameter_help = Command.extended_command_help, CommandParameter.extended_parameter_help
+    else:
+        command_help, parameter_help = Command.basic_command_help, CommandParameter.basic_parameter_help
+
+    if command_name is None:
+        out: str = ""
+        for i, command in enumerate(cli.commands):
+            out += f"{command_help(command)}"
+            if i != len(cli.commands) - 1:
+                out += "\n"
+        print(out)
+        return
+
+    if (command := cli.get_command(command_name)) is None:
+        raise UserError(npycli.command.cmd(help), f"{command_name} is not a command.")
+
+    if parameter_name is not None:
+        if (parameter := next(filter(lambda p: parameter_name in p.names, command.parameters)), None) is None:  # type: ignore
+            raise UserError(npycli.command.cmd(help), f"'{parameter_name}' is not a parameter")
+        print(parameter_help(parameter))
+
+    print(command_help(command))
+
+
 DEFAULT_LOG_PATH: str = "server.log"
+cli.parsers[LevelNames] = create_enum_parser(LevelNames)
 
 
 async def main(
@@ -943,27 +1129,61 @@ async def main(
     port: int,
     log_level: LevelNames = LevelNames.notset,
     log_file: Annotated[Optional[Path], DefaultPreview(DEFAULT_LOG_PATH)] = None
-) -> None:
+) -> int:
     log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
     log_file = log_file or Path(__file__).parent.joinpath(Path(DEFAULT_LOG_PATH))
     logger.setLevel(log_level.value)
 
-    stdout_handler: logging.StreamHandler[TextIO] = logging.StreamHandler(stdout)
-    stdout_handler.setLevel(log_level)
-    logger.addHandler(stdout_handler)
+    cli_handler.setLevel(log_level)
+    logger.addHandler(cli_handler)
 
-    file_handler: logging.FileHandler = logging.FileHandler(str(log_file))
+    global file_handler
+    file_handler = logging.FileHandler(str(log_file))
     file_handler.setLevel(log_level)
     logger.addHandler(file_handler)
 
+    cli_handler.command_result_logging = True
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
+        cli.env["server"] = server
 
         initial_heartbeat_delay: Task[None] = create_task(asyncio.sleep(3))
         server.closed_waiter.add_done_callback(lambda _: initial_heartbeat_delay.cancel())
         initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
 
-        await serve_task
+        try:
+            while server.is_serving():
+                user_input_task: Task[str] = create_task(input_async(cli.prompt_entry_marker))
+                server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
+                try:
+                    user_input: str = await user_input_task
+                except EOFError:
+                    await asyncio.sleep(30)
+                    continue
+
+
+                try:
+                    cli_handler.command_result_logging = True
+                    retval: Any = cli.exec(split(user_input))
+                except EmptyEntriesError:
+                    cli_handler.command_result_logging = False
+                    continue
+                except (CLIError, UserError) as err:
+                    logger.error(format_exc(err))
+                    cli_handler.command_result_logging = False
+                    continue
+                finally:
+                    cli_handler.command_result_logging = False
+
+                if iscoroutine(retval):
+                    await retval
+        except (CancelledError, KeyboardInterrupt):
+            if server.is_serving():
+                server.close()
+            if not serve_task.done():
+                await serve_task
+
+    return 0
 
 
 cmd: Command = Command.create(main, name="server", help="Serve the YouTube Sync server. Specify a host and port, logging level and log file.")  # type: ignore
@@ -972,6 +1192,6 @@ if __name__ == "__main__":
         if len(argv) == 1:
             print(cmd.extended_command_help())
         else:
-            run(cmd(argv[1:]))
+            exit(run(cmd(argv[1:], cli.parsers)))
     except KeyboardInterrupt:
         print("\n^C")
