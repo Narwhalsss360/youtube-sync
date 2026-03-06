@@ -25,6 +25,7 @@ import datetime
 import asyncio
 import logging
 import time
+import subprocess
 
 
 logger = logging.getLogger()
@@ -1075,7 +1076,7 @@ type LogHandlerName = Literal["console", "file"]
 cli.parsers[LogHandlerName] = create_literal_parser(LogHandlerName)
 
 
-@cli.cmd()
+@cli.cmd(help="Set/See the level of the console, or of the file log. To see, do not supply a value for level.")
 def level(handler_name: LogHandlerName, level: Optional[LevelNames] = None) -> None:
     assert file_handler is not None
     handler: Handler = cli_handler if handler_name == "console" else file_handler
@@ -1086,11 +1087,20 @@ def level(handler_name: LogHandlerName, level: Optional[LevelNames] = None) -> N
         handler.setLevel(level.value)
 
 
-@cli.cmd()
+@cli.cmd(names=("quit", "q", "exit", "stop"), help="Stop serving and exit program.")
 async def quit() -> None:
     server: Server = get_server()
     server.close()
     await server.closed_waiter
+
+
+@cli.cmd("!", help="Start a subprocess")
+async def shell_cmd(*args: str, **kwargs: str) -> None:
+    subprocess_args: list[str] = [*args]
+    for kwarg, value in kwargs.items():
+        subprocess_args.append(f"{cli.kwarg_prefix}{kwarg}")
+        subprocess_args.append(value)
+    await to_thread(subprocess.run, subprocess_args, shell=True)
 
 
 @cli.cmd("help")
@@ -1110,14 +1120,15 @@ def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] =
         return
 
     if (command := cli.get_command(command_name)) is None:
-        raise UserError(npycli.command.cmd(help), f"{command_name} is not a command.")
+        raise UserError(npycli.command.cmd(help_cmd), f"{command_name} is not a command.")
 
     if parameter_name is not None:
         if (parameter := next(filter(lambda p: parameter_name in p.names, command.parameters)), None) is None:  # type: ignore
-            raise UserError(npycli.command.cmd(help), f"'{parameter_name}' is not a parameter")
+            raise UserError(npycli.command.cmd(help_cmd), f"'{parameter_name}' is not a parameter")
         print(parameter_help(parameter))
+        return
 
-    print(command_help(command))
+    print(f"{command_help(command)}; {command.help}")
 
 
 DEFAULT_LOG_PATH: str = "server.log"
@@ -1161,7 +1172,6 @@ async def main(
                     await asyncio.sleep(30)
                     continue
 
-
                 try:
                     cli_handler.command_result_logging = True
                     retval: Any = cli.exec(split(user_input))
@@ -1169,6 +1179,8 @@ async def main(
                     cli_handler.command_result_logging = False
                     continue
                 except (CLIError, UserError) as err:
+                    if isinstance(err, CLIError) and err.__cause__:
+                        err = err.__cause__
                     logger.error(format_exc(err))
                     cli_handler.command_result_logging = False
                     continue
