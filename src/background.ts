@@ -701,6 +701,7 @@ function portConnect(port: browser.runtime.Port) {
 
   port.onDisconnect.addListener(disconnected => {
     serviceState.contentPorts = serviceState.contentPorts.filter(p => p !== disconnected);
+    broadcastPackagedStateToRuntime();
     if (serviceState.activeTabPort !== disconnected) {
       return;
     }
@@ -736,7 +737,8 @@ function portConnect(port: browser.runtime.Port) {
       }, TIMEOUT_INTERVAL)
     });
   });
- serviceState.contentPorts.push(port);
+  serviceState.contentPorts.push(port);
+  broadcastPackagedStateToRuntime();
 }
 
 async function setCurrentTabAsActiveTab() {
@@ -799,3 +801,4 @@ function main() {
 }
 
 main();
+
