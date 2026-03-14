@@ -7,7 +7,7 @@ from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
 from sys import argv, stderr, stdout
 from npycli import CLIError, Command, DefaultPreview, CLI, EmptyEntriesError  # pyright: ignore[reportMissingTypeStubs]
-from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, ANSIControl, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION  # pyright: ignore[reportMissingTypeStubs]
+from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, ANSIControl, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION, strip_ansi  # pyright: ignore[reportMissingTypeStubs]
 from npycli.parsing import create_enum_parser, create_literal_parser  # pyright: ignore[reportMissingTypeStubs]
 from npycli.parameters import CommandParameter  # pyright: ignore[reportMissingTypeStubs]
 from asyncio import iscoroutine, run, Task, create_task, gather, Future, to_thread, CancelledError
@@ -92,7 +92,7 @@ def ensure_constructed_rethrow_type_or_value_error[T](
         return value
 
     try:
-        value = value_type(value) # type: ignore
+        value = value_type(value)  # type: ignore
         if not type_check(value):
             raise DataParseError(for_cls, f"Type check failure for the field {field_name}")
         return value
@@ -203,7 +203,6 @@ class VideoInfo:
             False
         ))
 
-
         parsed.channelImageUrl = well_defined(ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
@@ -241,9 +240,8 @@ class UserHostingOptions:
         except TypeError as e:
             raise DataParseError(cls, *e.args)
 
-
         if not isinstance(undefined(parsed.cohostsUUID), list):
-            raise DataParseError(cls, f"cohostsUUID must be a list")
+            raise DataParseError(cls, "cohostsUUID must be a list")
 
         for i, value in zip(range(len(parsed.cohostsUUID)), parsed.cohostsUUID):
             parsed.cohostsUUID[i] = well_defined(ensure_constructed_rethrow_type_or_value_error(
@@ -414,7 +412,6 @@ class User:
         return self
 
 
-
 class MessageTypes(str, Enum):
     Error = "error"
     ServerHandshakeRequest = "server-handshake-request"
@@ -497,6 +494,7 @@ class ServerHandshakeRequestMessage:
         parsed.user = User.from_data(parsed.user, False)
 
         return parsed
+
 
 @dataclass
 class ServerHandshakeMessage:
@@ -737,7 +735,7 @@ def parse_message(data: Any) -> ReceivableMessage:
         raise DataParseError(GenericMessage, "Data must be a dictionary/JSON object.")
 
     if "type" not in data or not isinstance(data["type"], str):
-        raise DataParseError(GenericMessage, f"Message type required for every message.")
+        raise DataParseError(GenericMessage, "Message type required for every message.")
     message_type: str = data["type"]
 
     cls = next(
@@ -929,8 +927,7 @@ def heartbeat(server: Server) -> None:
         if time.time() - user.last_communication_time >= KEEP_ALIVE_INTERVAL:
             tasks.append(create_task(send_to(user, KeepAliveMessage(), logging.DEBUG)))
 
-
-    def tasks_done(future: Future[list[None]]) -> None:
+    def tasks_done(_: Future[list[None]]) -> None:
         delay_task: Task[None] = create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
         server.closed_waiter.add_done_callback(lambda _: delay_task.cancel())
         delay_task.add_done_callback(lambda _: heartbeat(server))
@@ -994,27 +991,27 @@ def print_above(*args: Any, max_columns: int, sep: str | None = " ", file: TextI
 
     line_count: int = 1
     line_length: int = 0
-    for c in output:
+    for c in strip_ansi(output):
         line_length += 1
         if line_length == max_columns or c == "\n":
             line_count += 1
             line_length = 0
 
-    send_ansi(SAVE_CURRENT_CURSOR_POSITION)
+    send_ansi(SAVE_CURRENT_CURSOR_POSITION, flush=True)
     if current_is_empty:
-        print("\n" * lines_above, file=file, end="")
-        send_ansi(CURSOR_UP.with_args(1 + lines_above), file=file)
+        print("\n" * lines_above, file=file, end="", flush=True)
+        send_ansi(CURSOR_UP.with_args(lines_above), file=file, flush=True)
 
     # These ansi control commands may be supplied with arguments
-    print("\n" * (line_count), file=file, end="")
-    send_ansi(CURSOR_UP.with_args(line_count + lines_above), file=file)
+    print("\n" * line_count, file=file, end="", flush=True)
+    send_ansi(CURSOR_UP.with_args(line_count + lines_above - (0 if current_is_empty else 1)), file=file, flush=True)
     # This one doesn't have argument, so we just repeat the command
-    send_ansi(INSERT_NEW_LINE, repeat=line_count, file=file)
+    send_ansi(INSERT_NEW_LINE, repeat=line_count, file=file, flush=True)
 
     # Flush, just in case current cursor position gets moved after output
     print(output, end='', file=file, flush=True)
-    send_ansi(RESTORE_SAVED_CURSOR_POSITION, file=file)
-    send_ansi(CURSOR_DOWN.with_args(line_count), file=file)
+    send_ansi(RESTORE_SAVED_CURSOR_POSITION, file=file, flush=True)
+    send_ansi(CURSOR_DOWN.with_args(line_count), file=file, flush=True)
 
 
 class CommandLineInterfaceHandler(Handler):
@@ -1066,6 +1063,7 @@ class UserError(Exception):
         self.command: Command = command
         self.message: str = message
 
+
 def get_server() -> Server:
     if (server := cli.env.get("server", None)) is None:
         raise NotImplementedError()
@@ -1094,7 +1092,7 @@ async def quit() -> None:
     await server.closed_waiter
 
 
-@cli.cmd("!", help="Start a subprocess")
+@cli.cmd(names=("shell", "!"), help="Start a subprocess")
 async def shell_cmd(*args: str, **kwargs: str) -> None:
     subprocess_args: list[str] = [*args]
     for kwarg, value in kwargs.items():
@@ -1103,7 +1101,7 @@ async def shell_cmd(*args: str, **kwargs: str) -> None:
     await to_thread(subprocess.run, subprocess_args, shell=True)
 
 
-@cli.cmd("help")
+@cli.cmd(names=("help", "h"))
 def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] = None, extended: bool = False) -> None:
     if extended:
         command_help, parameter_help = Command.extended_command_help, CommandParameter.extended_parameter_help
@@ -1111,12 +1109,7 @@ def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] =
         command_help, parameter_help = Command.basic_command_help, CommandParameter.basic_parameter_help
 
     if command_name is None:
-        out: str = ""
-        for i, command in enumerate(cli.commands):
-            out += f"{command_help(command)}"
-            if i != len(cli.commands) - 1:
-                out += "\n"
-        print(out)
+        print("\n\n".join(command_help(cmd) for cmd in cli.commands))
         return
 
     if (command := cli.get_command(command_name)) is None:
