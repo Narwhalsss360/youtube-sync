@@ -37,7 +37,9 @@ import {
   isRequestVideoInfoMessage,
   isDisconnectFromServerMessage,
   wellDefined,
-  isKeepAliveMessage
+  isKeepAliveMessage,
+  Notification,
+  isNotifyMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -51,7 +53,8 @@ const serviceState: {
   serverConnection: WebSocket | null,
   reconnectToTab: number | null,
   pendingServerRequests: Array<GenericMessage>,
-  contentPorts: Array<browser.runtime.Port>
+  contentPorts: Array<browser.runtime.Port>,
+  notifications: Array<Notification>
 } = {
   user: structuredClone(userDefaults),
   users: [],
@@ -59,7 +62,8 @@ const serviceState: {
   serverConnection: null,
   reconnectToTab: null,
   pendingServerRequests: [],
-  contentPorts: []
+  contentPorts: [],
+  notifications: []
 };
 
 function packageServiceState(): PackagedServiceState {
@@ -69,7 +73,8 @@ function packageServiceState(): PackagedServiceState {
     activeTabId: serviceState.activeTabPort?.sender?.tab?.id ?? null,
     serverAddress: serviceState.serverConnection?.url ?? null,
     pendingServerRequests: serviceState.pendingServerRequests,
-    availableTabIds: Array.from(serviceState.contentPorts).map(port => wellDefined(port.sender?.tab?.id, new Error("Every content port must have a tab id")))
+    availableTabIds: Array.from(serviceState.contentPorts).map(port => wellDefined(port.sender?.tab?.id, new Error("Every content port must have a tab id"))),
+    notifications: serviceState.notifications
   };
 }
 
@@ -338,6 +343,15 @@ function processServerMessage(message: Message) {
       wellDefinedMessage(isKeepAliveMessage, MessageTypes.KeepAlive, message);
       break;
     }
+    case MessageTypes.Notify: {
+      const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
+      serviceState.notifications.push(notifyMessage.notification)
+      broadcastPackagedStateToRuntime();
+      if (serviceState.activeTabPort) {
+        serviceState.activeTabPort.postMessage(notifyMessage);
+      }
+      break;
+    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");
@@ -375,6 +389,15 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       notifyServerOfVideoInfo();
       const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
       serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.Notify: {
+      const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
+      serviceState.notifications.push(notifyMessage.notification)
+      broadcastPackagedStateToRuntime();
+      if (serviceState.activeTabPort) {
+        serviceState.activeTabPort.postMessage(notifyMessage);
+      }
       break;
     }
     default: {
@@ -663,6 +686,15 @@ function processRuntimeMessage(
       sendResponse(pendingMessage);
       break;
     }
+    case MessageTypes.Notify: {
+      const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
+      serviceState.notifications.push(notifyMessage.notification)
+      broadcastPackagedStateToRuntime();
+      if (serviceState.activeTabPort) {
+        serviceState.activeTabPort.postMessage(notifyMessage);
+      }
+      break;
+    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");
@@ -778,19 +810,6 @@ async function setCurrentTabAsActiveTab() {
 function main() {
   browser.runtime.onMessage.addListener(processRuntimeMessage);
   browser.runtime.onConnect.addListener(portConnect);
-
-  /*
-  serviceState.user.uuid = "test-uuid";
-  serviceState.user.username = "this user";
-
-  serviceState.users.push({
-    ...serviceState.user,
-    uuid: "test-mimic-uuuid",
-    username: "this user mimic",
-    followingUUID: serviceState.user.uuid
-  });
-  serviceState.user.followerUUIDs = ["test-mimic-uuid"];
-  */
 
   (globalThis as any).backgroundSerivce = Object.freeze({
     serviceState,

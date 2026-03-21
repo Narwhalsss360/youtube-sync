@@ -82,7 +82,8 @@ const popupState : {
     activeTabId: null,
     serverAddress: null,
     pendingServerRequests: [],
-    availableTabIds: []
+    availableTabIds: [],
+    notifications: []
   },
   usersWithSelf: () => [popupState.packagedServiceState.user, ...popupState.packagedServiceState.users],
 };

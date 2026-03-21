@@ -412,6 +412,59 @@ class User:
         return self
 
 
+@dataclass
+class Notification:
+    epoch: int
+    sender: str
+    message: str
+    dismissed: bool
+
+    @classmethod
+    def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
+        if isinstance(data, cls):
+            return data
+        assert isinstance(data, dict)
+
+        try:
+            parsed: Self = cls(**data)
+        except TypeError as e:
+            raise DataParseError(cls, *e.args)
+
+        parsed.epoch = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            int,
+            "epoch",
+            parsed.epoch,
+            False
+        ))
+
+        parsed.sender = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "sender",
+            parsed.sender,
+            False
+        ))
+
+        parsed.message = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "message",
+            parsed.message,
+            False
+        ))
+
+        parsed.dismissed = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            bool,
+            "dismissed",
+            parsed.dismissed,
+            False
+        ))
+
+        return parsed
+
+
 class MessageTypes(str, Enum):
     Error = "error"
     ServerHandshakeRequest = "server-handshake-request"
@@ -425,6 +478,7 @@ class MessageTypes(str, Enum):
     StopFollowing = "stop-following"
     RequestVideoInfo = "request-video-info"
     KeepAlive = "keep-alive"
+    Notify = "notify"
 
 
 @dataclass
@@ -695,6 +749,31 @@ class RequestVideoInfoMessage:
 class KeepAliveMessage:
     MESSAGE_TYPE_VALUE = MessageTypes.KeepAlive.value
     type: str = field(default=MESSAGE_TYPE_VALUE)
+
+
+@dataclass
+class NotifyMessage:
+    MESSAGE_TYPE_VALUE = MessageTypes.Notify.value
+    notification: Notification
+    type: str = field(default=MESSAGE_TYPE_VALUE)
+
+    @classmethod
+    def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
+        if isinstance(data, cls):
+            return data
+        assert isinstance(data, dict)
+
+        try:
+            parsed: Self = cls(**data)
+        except TypeError as e:
+            raise DataParseError(cls, *e.args)
+
+        if parsed.type != cls.MESSAGE_TYPE_VALUE:
+            raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
+
+        parsed.notification = Notification.from_data(parsed.notification)
+
+        return parsed
 
 
 type Message = (

@@ -382,13 +382,49 @@ export function detectUserUpdates(user: User | undefined, newUser: User): Array<
     .filter(key => !propertyEquals(user, newUser, key, comparers[key])) as Array<keyof User>;
 }
 
+export interface Notification {
+  epoch: number,
+  sender: string,
+  message: string,
+  dismissed: boolean
+};
+
+export function isNotification(object: any | null | undefined): object is Notification {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (typeof object.epoch !== "number") {
+    return false;
+  }
+
+  if (typeof object.sender !== "string") {
+    return false;
+  }
+
+  if (typeof object.message !== "string") {
+    return false;
+  }
+
+  if (typeof object.dismissed !== "boolean") {
+    return false;
+  }
+
+  return true;
+}
+
 export interface PackagedServiceState {
   user: User,
   users: Array<User>,
   activeTabId: number | null,
   serverAddress: string | null,
   pendingServerRequests: Array<GenericMessage>,
-  availableTabIds: Array<number>
+  availableTabIds: Array<number>,
+  notifications: Array<Notification>
 };
 
 export function isPackagedServiceState(object: any | null | undefined): object is PackagedServiceState {
@@ -450,6 +486,16 @@ export function isPackagedServiceState(object: any | null | undefined): object i
     }
   }
 
+  if (!Array.isArray(object.notifications)) {
+    return false;
+  }
+
+  for (const notification of object.notifications) {
+    if (!isNotification(notification)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -501,7 +547,8 @@ export enum MessageTypes {
   StopFollowing = "stop-following",
   Pending = "pending",
   RequestVideoInfo = "request-video-info",
-  KeepAlive = "keep-alive"
+  KeepAlive = "keep-alive",
+  Notify = "notify"
 };
 
 export interface GenericMessage {
@@ -987,6 +1034,31 @@ export function isKeepAliveMessage(object: any | null | undefined): object is Ke
   return true;
 }
 
+export interface NotifyMessage extends GenericMessage {
+  type: MessageTypes.Notify,
+  notification: Notification
+};
+
+export function isNotifyMessage(object: any | null | undefined): object is NotifyMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.Notify) {
+    return false;
+  }
+
+  if (!isNotification(object.notification)) {
+    return false;
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -1005,7 +1077,8 @@ export type Message = (
   FollowMessage |
   StopFollowingMessage |
   PendingMessage |
-  RequestVideoInfoMessage
+  RequestVideoInfoMessage |
+  NotifyMessage
 );
 
 export function wellDefinedMessage<T extends Message>(
