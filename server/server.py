@@ -1,15 +1,15 @@
 from __future__ import annotations
 from typing import Literal, TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast, Annotated
 from enum import Enum
-from dataclasses import dataclass, field, is_dataclass, asdict
+from dataclasses import Field, dataclass, field, fields, is_dataclass, asdict
 from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
 from sys import argv, stderr, stdout
-from npycli import CLIError, Command, DefaultPreview, CLI, EmptyEntriesError  # pyright: ignore[reportMissingTypeStubs]
+from npycli import CLIError, Command, DefaultPreview, CLI, EmptyEntriesError, ParsingError  # pyright: ignore[reportMissingTypeStubs]
 from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, ANSIControl, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION, strip_ansi  # pyright: ignore[reportMissingTypeStubs]
 from npycli.parsing import create_enum_parser, create_literal_parser  # pyright: ignore[reportMissingTypeStubs]
-from npycli.parameters import CommandParameter  # pyright: ignore[reportMissingTypeStubs]
+from npycli.parameters import BypassParse, CommandParameter  # pyright: ignore[reportMissingTypeStubs]
 from asyncio import iscoroutine, run, Task, create_task, gather, Future, to_thread, CancelledError
 from uuid import uuid4
 from pathlib import Path
@@ -1085,6 +1085,80 @@ def level(handler_name: LogHandlerName, level: Optional[LevelNames] = None) -> N
         handler.setLevel(level.value)
 
 
+type UserSpec = User
+
+
+def user_from_user_spec(string: str) -> UserSpec:
+    if string in connected_users_by_uuid:
+        return connected_users_by_uuid[string]
+
+    try:
+        return next(filter(lambda user: user.username == string, connected_users_by_uuid.values()))
+    except StopIteration:
+        raise ParsingError(user_from_user_spec.__name__, "Could not find user by id or by username")
+
+
+cli.parsers[UserSpec] = user_from_user_spec
+
+
+def wrap_dc_str(instance: Any, tabs: int = 0, repr_function: Callable[[Any], str] | None = None, tab_chars: str = "    ") -> str:
+    repr_function = repr_function or repr
+    out: str = f"{type(instance).__name__}(\n"
+    instance_fields: tuple[Field[Any], ...] = tuple(filter(lambda f: f.repr, fields(instance)))
+    tabstr: str = tab_chars * (tabs + 1)
+    for i, instance_field in enumerate(instance_fields):
+        out += f"{tabstr}{instance_field.name}="
+        value = getattr(instance, instance_field.name)
+
+        if isinstance(value, list):
+            if not value:
+                out += "[]"
+            else:
+                out += "[\n"
+                for j, item in enumerate(value):
+                    out += f"{tabstr}{tab_chars}{wrap_dc_str(item, tabs + 2, repr_function) if is_dataclass(item) else repr_function(item)}"
+                    if j != len(value) - 1:
+                        out += ","
+                    out += "\n"
+                out += f"{tabstr}]"
+        elif isinstance(value, dict):
+            if not value:
+                out += "{}"
+            else:
+                out += "{\n"
+                for j, (k, v) in enumerate(value.items()):
+                    out += f"{tabstr}{tab_chars}{k}: "
+                    out += wrap_dc_str(v, tabs + 2, repr_function) if is_dataclass(v) else f"{tabstr}{tab_chars}{repr_function(v)}"
+                    if j != len(value) - 1:
+                        out += ","
+                    out += "\n"
+                out += f"{tabstr}}}"
+        else:
+            out += wrap_dc_str(value, tabs + 1, repr_function) if is_dataclass(value) else repr_function(value)
+
+        if i != len(instance_fields) - 1:
+            out += ","
+        out += "\n"
+    out += f"{tab_chars * tabs})"
+    return out
+
+
+@cli.cmd(help="See a list of the currently connected users.")
+def users(uuids: bool = False) -> None:
+    for user in connected_users_by_uuid.values():
+        print(f"{(f"{user.uuid}: " if uuids else "")}{user.username}")
+
+
+@cli.cmd(help="See user details")
+def details(user: UserSpec) -> None:
+    print(wrap_dc_str(user))
+
+
+@cli.cmd(help="Kick a user")
+async def kick(user: UserSpec) -> None:
+    await user.connection.close()
+
+
 @cli.cmd(names=("quit", "q", "exit", "stop"), help="Stop serving and exit program.")
 async def quit() -> None:
     server: Server = get_server()
@@ -1092,13 +1166,9 @@ async def quit() -> None:
     await server.closed_waiter
 
 
-@cli.cmd(names=("shell", "!"), help="Start a subprocess")
-async def shell_cmd(*args: str, **kwargs: str) -> None:
-    subprocess_args: list[str] = [*args]
-    for kwarg, value in kwargs.items():
-        subprocess_args.append(f"{cli.kwarg_prefix}{kwarg}")
-        subprocess_args.append(value)
-    await to_thread(subprocess.run, subprocess_args, shell=True)
+@cli.cmd("!", help="Start a subprocess")
+async def shell_cmd(*args: BypassParse) -> None:
+    await to_thread(subprocess.run, args, shell=True)
 
 
 @cli.cmd(names=("help", "h"))
