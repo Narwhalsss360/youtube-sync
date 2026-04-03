@@ -43,7 +43,6 @@ import {
   isNotificationDismissedMessage,
   OpenNotificationsMessage
 } from "./types"
-import { clear } from "node:console";
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
   type: MessageTypes.Acknowledge
@@ -149,6 +148,21 @@ async function openNotifications(retry: boolean = true) {
     type: MessageTypes.OpenNotifications
   };
 
+  if (serviceState.activeTabPort === null) {
+    return;
+  }
+
+  if (serviceState.activeTabPort.sender?.tab?.id === undefined) {
+    throw new Error(`In ${openNotifications.name}: Tab ID was undefined.`);
+  }
+
+  const tab: browser.tabs.Tab = await browser.tabs.get(serviceState.activeTabPort.sender.tab.id);
+  const window: browser.windows.Window = await browser.windows.get(tab.windowId);
+
+  if (!tab.active || !window.focused) {
+    return;
+  }
+
   try {
     await browser.runtime.sendMessage(openNotificationsMessage);
     return;
@@ -158,17 +172,17 @@ async function openNotifications(retry: boolean = true) {
     return;
   }
 
-  const windowId: number = wellDefined((await browser.windows.getCurrent()).id, new Error("Background Service State: Unexpected undefined current window."));
-  const window = await chrome.windows.get(windowId);
-  if (!window.focused) {
-    return;
-  }
-
   try {
     await browser.action.openPopup({
-      windowId
+      windowId: tab.windowId
     });
   } catch (err) {
+    if (!retry) {
+      console.error("Could not open popup:");
+      console.error(err);
+      return;
+    }
+
     console.warn(`Assuming Popup is open: ${err}, will trying once more...`);
     setTimeout(async () => openNotifications(false), 250);
     return;
@@ -222,6 +236,8 @@ function notifyServerOfSelf() {
   };
   serviceState.serverConnection.send(JSON.stringify(userMessage));
 }
+
+notifyServerOfSelf as unknown as void; // To be used after more implementation.
 
 function cleanupServerConnection() {
   if (serviceState.serverConnection === null) {

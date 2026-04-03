@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isAcknowledgeMessage, isErrorMessage, isGenericMessage, isNotifyMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: boolean,
@@ -45,7 +45,7 @@ function isMiniplayer(video: HTMLVideoElement): boolean {
 }
 
 function waitForVideoElement(): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _) => {
     let video = document.querySelector("video");
     if (video) {
       resolve(video);
@@ -259,7 +259,7 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
     }
 
     if (!video.src) {
-      await onVideoInfoChanged(null);
+      onVideoInfoChanged(null);
       return;
     }
 
@@ -267,7 +267,7 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
       video.dispatchEvent(expandPlayerKeyboardEvent);
     }
 
-    await onVideoInfoChanged(await waitForMetadata());
+    onVideoInfoChanged(await waitForMetadata());
   }
 
   if (video !== null) {
@@ -497,6 +497,8 @@ function processRuntimeMessage(
   sender: browser.runtime.MessageSender,
   sendResponse: (response?: any) => void
 ): boolean | Promise<any> | undefined {
+  sendResponse as unknown as void;
+
   if (!isGenericMessage(message)) {
     throw new Error("Recieved unknown message");
   }
