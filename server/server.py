@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Literal, TextIO, TypeGuard, Type, Any, Callable, Optional, Self, get_args, cast, Annotated
 from enum import Enum
 from dataclasses import Field, dataclass, field, fields, is_dataclass, asdict
+from npycli.errors import causes
 from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
@@ -788,7 +789,8 @@ type Message = (
     FollowMessage |
     StopFollowingMessage |
     RequestVideoInfoMessage |
-    KeepAliveMessage
+    KeepAliveMessage |
+    NotifyMessage
 )
 
 type ReceivableMessage = (
@@ -803,6 +805,7 @@ type ReceivableMessage = (
 )
 
 receiveable_message_classes: tuple[Type[ReceivableMessage]] = get_args(ReceivableMessage.__value__)
+
 
 def parse_message(data: Any) -> ReceivableMessage:
     if isinstance(data, str):
@@ -1055,10 +1058,6 @@ async def input_async(prompt: object = None) -> str:
 
 
 def print_above(*args: Any, max_columns: int, sep: str | None = " ", file: TextIO = stdout, current_is_empty: bool = False, lines_above: int = 1) -> None:
-    '''
-    Print above the current line.
-    '''
-
     if lines_above == 0:
         print(*args, sep=sep)
         return
@@ -1233,8 +1232,24 @@ def details(user: UserSpec) -> None:
     print(wrap_dc_str(user))
 
 
+@cli.cmd(help="Send a notification to a user.")
+async def notify(user: UserSpec, message: str) -> None:
+    await send_to(user, NotifyMessage(Notification(
+        int(datetime.datetime.now().timestamp() * 1000),
+        "Server Administrator",
+        message,
+        False
+    )), logging.INFO)
+
+
 @cli.cmd(help="Kick a user")
 async def kick(user: UserSpec) -> None:
+    await send_to(user, NotifyMessage(Notification(
+        int(datetime.datetime.now().timestamp() * 1000),
+        "Server",
+        "You are being kicked",
+        False
+    )), logging.INFO)
     await user.connection.close()
 
 
@@ -1315,8 +1330,14 @@ async def main(
                     continue
 
                 try:
+                    entries: list[str] = split(user_input)
+                except Exception as exc:
+                    print(f"{"\n".join(f"{e.__class__.__name__}: {e}" for e in causes(exc, True))}", file=stderr)
+                    continue
+
+                try:
                     cli_handler.command_result_logging = True
-                    retval: Any = cli.exec(split(user_input))
+                    retval: Any = cli.exec(entries)
                 except EmptyEntriesError:
                     cli_handler.command_result_logging = False
                     continue
