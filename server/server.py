@@ -850,8 +850,13 @@ def update_following_info() -> None:
 
     for user in connected_users_by_uuid.values():
         user.waiting_for_acknowledge.append(UsersMessage([]))
-        if user.followingUUID is not None:
-            connected_users_by_uuid[user.followingUUID].followerUUIDs.append(user.uuid)
+        if user.followingUUID is None:
+            continue
+
+        if (following := connected_users_by_uuid.get(user.followingUUID, None)) is not None:
+            following.followerUUIDs.append(user.uuid)
+        else:
+            user.followingUUID = None
 
 
 async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
