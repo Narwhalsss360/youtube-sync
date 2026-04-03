@@ -13,13 +13,24 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "icons": {
+      "16": "yt-sync-icon16.png",
+      "24": "yt-sync-icon24.png",
+      "32": "yt-sync-icon32.png",
+      "48": "yt-sync-icon48.png",
+      "64": "yt-sync-icon64.png",
+      "128": "yt-sync-icon128.png"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "YouTube Sync",
     "default_icon": {
       "16": "yt-sync-icon16.png",
       "24": "yt-sync-icon24.png",
-      "32": "yt-sync-icon32.png"
+      "32": "yt-sync-icon32.png",
+      "48": "yt-sync-icon48.png",
+      "64": "yt-sync-icon64.png",
+      "128": "yt-sync-icon128.png"
     }
   },
   "content_scripts": [
