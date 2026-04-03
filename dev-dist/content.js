@@ -1228,7 +1228,7 @@ function follow(user) {
                     notification: {
                         epoch: Date.now(),
                         sender: "Follower",
-                        message: `${user.username} syncrhonizing paused time.`,
+                        message: `${user.username} synchronizing paused time.`,
                         dismissed: false
                     }
                 };
