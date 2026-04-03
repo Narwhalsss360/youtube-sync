@@ -726,9 +726,9 @@ async function main() {
   };
 }
 
-const debugInterval = setInterval(() => {
-  clearInterval(debugInterval);
-  debugger;
-  main();
-}, 500);
-// main();
+// const debugInterval = setInterval(() => {
+//   clearInterval(debugInterval);
+//   debugger;
+//   main();
+// }, 500);
+main();
