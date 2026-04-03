@@ -548,7 +548,9 @@ export enum MessageTypes {
   Pending = "pending",
   RequestVideoInfo = "request-video-info",
   KeepAlive = "keep-alive",
-  Notify = "notify"
+  Notify = "notify",
+  NotificationDismissed = "notification-dismissed",
+  OpenNotifications = "open-notifications"
 };
 
 export interface GenericMessage {
@@ -1059,6 +1061,51 @@ export function isNotifyMessage(object: any | null | undefined): object is Notif
   return true;
 }
 
+export interface NotificationDismissedMessage extends GenericMessage {
+  type: MessageTypes.NotificationDismissed,
+  notification: Notification
+};
+
+export function isNotificationDismissedMessage(object: any | null | undefined): object is NotificationDismissedMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.NotificationDismissed) {
+    return false;
+  }
+
+  if (!isNotification(object.notification)) {
+    return false;
+  }
+
+  return true;
+}
+
+export interface OpenNotificationsMessage extends GenericMessage {
+  type: MessageTypes.OpenNotifications,
+};
+
+export function isOpenNotificationsMessage(object: any | null | undefined): object is OpenNotificationsMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.OpenNotifications) {
+    return false;
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -1078,7 +1125,9 @@ export type Message = (
   StopFollowingMessage |
   PendingMessage |
   RequestVideoInfoMessage |
-  NotifyMessage
+  NotifyMessage |
+  NotificationDismissedMessage |
+  OpenNotificationsMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

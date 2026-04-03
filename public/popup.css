@@ -82,6 +82,49 @@ input, button {
   margin-bottom: 8px;
 }
 
+.notifications {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  min-width: 180px;
+  margin: 0px 4px -8px 4px;
+}
+
+.notification {
+    display: flex;
+    flex-direction: column;
+    max-width: 620px;
+    width: 100%;
+    padding: 8px;
+    border-radius: 5px;
+    background-color: hsl(0, 0%, 18%);
+    margin-bottom: 8px;
+}
+
+.notification-header {
+    display: flex;
+    max-width: 620px;
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+}
+
+.notification-body {
+    display: flex;
+    max-width: 620px;
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 8px;
+}
+
+.notifications-control {
+  margin-top: 2px;
+}
+
+.dismiss-notification-button {
+  width: 100%;
+}
+
 .no-current-video {
   font-weight: bold;
   text-align: center;

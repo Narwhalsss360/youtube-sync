@@ -39,8 +39,11 @@ import {
   wellDefined,
   isKeepAliveMessage,
   Notification,
-  isNotifyMessage
+  isNotifyMessage,
+  isNotificationDismissedMessage,
+  OpenNotificationsMessage
 } from "./types"
+import { clear } from "node:console";
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
   type: MessageTypes.Acknowledge
@@ -133,6 +136,66 @@ function processSelfUpdateFromServer(user: User, broadcast: boolean = false): vo
     serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
     serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
   }
+}
+
+function insertNotification(notification: Notification): void {
+  serviceState.notifications.push(notification);
+}
+
+let openingPopup: boolean = false;
+
+async function openNotifications(retry: boolean = true) {
+  const openNotificationsMessage: OpenNotificationsMessage = {
+    type: MessageTypes.OpenNotifications
+  };
+
+  try {
+    await browser.runtime.sendMessage(openNotificationsMessage);
+    return;
+  } catch {}
+
+  if (openingPopup) {
+    return;
+  }
+
+  const windowId: number = wellDefined((await browser.windows.getCurrent()).id, new Error("Background Service State: Unexpected undefined current window."));
+  const window = await chrome.windows.get(windowId);
+  if (!window.focused) {
+    return;
+  }
+
+  try {
+    await browser.action.openPopup({
+      windowId
+    });
+  } catch (err) {
+    console.warn(`Assuming Popup is open: ${err}, will trying once more...`);
+    setTimeout(async () => openNotifications(false), 250);
+    return;
+  }
+
+  openingPopup = true;
+  let i: number = 0;
+  const id = setInterval(async () => {
+    try {
+      await browser.runtime.sendMessage(openNotificationsMessage);
+      clearInterval(id);
+      openingPopup = false;
+    } catch (err) {
+      i++;
+      if (i == 200) {
+        clearInterval(id);
+        openingPopup = false;
+        throw new Error("Timed out sending open notifications message.");
+      }
+    }
+  }, 20);
+}
+
+function clearNotifications() {
+  serviceState.notifications = [];
+  const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+  serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
 }
 
 function notifyServerOfVideoInfo() {
@@ -345,11 +408,21 @@ function processServerMessage(message: Message) {
     }
     case MessageTypes.Notify: {
       const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
-      serviceState.notifications.push(notifyMessage.notification)
-      broadcastPackagedStateToRuntime();
-      if (serviceState.activeTabPort) {
-        serviceState.activeTabPort.postMessage(notifyMessage);
-      }
+      insertNotification(notifyMessage.notification);
+      openNotifications()
+
+      const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.NotificationDismissed: {
+      console.error(`Server may not send a ${MessageTypes.NotificationDismissed} message.`);
+      const errorMessage: ErrorMessage = {
+        type: MessageTypes.Error,
+        message: `Server may not send a ${MessageTypes.NotificationDismissed} message.`,
+        sender: `${serviceState.user.uuid}: Background Service Worker`
+      };
+      serviceState.serverConnection.send(JSON.stringify(errorMessage));
       break;
     }
     default: {
@@ -393,11 +466,40 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
     }
     case MessageTypes.Notify: {
       const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
-      serviceState.notifications.push(notifyMessage.notification)
-      broadcastPackagedStateToRuntime();
-      if (serviceState.activeTabPort) {
-        serviceState.activeTabPort.postMessage(notifyMessage);
+      insertNotification(notifyMessage.notification);
+      openNotifications()
+      const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.NotificationDismissed: {
+      const notificationDismissedMessage = wellDefinedMessage(isNotificationDismissedMessage, MessageTypes.NotificationDismissed, message);
+      const notification: Notification | undefined = serviceState.notifications.find(notification => notification.epoch == notificationDismissedMessage.notification.epoch && notification.sender == notificationDismissedMessage.notification.sender);
+      if (notification === undefined) {
+        console.error("Unknown notification dismissed.");
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Unknown notification dismissed.",
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        serviceState.activeTabPort?.postMessage(errorMessage);
+        break;
       }
+
+      if (notification.dismissed) {
+        console.error("Notification already dismissed.");
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Notification already dismissed.",
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        serviceState.activeTabPort?.postMessage(errorMessage);
+        break;
+      }
+
+      notification.dismissed = true;
+      const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
     }
     default: {
@@ -688,11 +790,40 @@ function processRuntimeMessage(
     }
     case MessageTypes.Notify: {
       const notifyMessage = wellDefinedMessage(isNotifyMessage, MessageTypes.Notify, message);
-      serviceState.notifications.push(notifyMessage.notification)
-      broadcastPackagedStateToRuntime();
-      if (serviceState.activeTabPort) {
-        serviceState.activeTabPort.postMessage(notifyMessage);
+      insertNotification(notifyMessage.notification);
+      openNotifications()
+      const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.NotificationDismissed: {
+      const notificationDismissedMessage = wellDefinedMessage(isNotificationDismissedMessage, MessageTypes.NotificationDismissed, message);
+      const notification: Notification | undefined = serviceState.notifications.find(notification => notification.epoch == notificationDismissedMessage.notification.epoch && notification.sender == notificationDismissedMessage.notification.sender);
+      if (notification === undefined) {
+        console.error("Unknown notification dismissed.");
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Unknown notification dismissed.",
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        sendResponse(errorMessage);
+        break;
       }
+
+      if (notification.dismissed) {
+        console.error("Notification already dismissed.");
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Notification already dismissed.",
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        sendResponse(errorMessage);
+        break;
+      }
+
+      notification.dismissed = true;
+      const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
     }
     default: {
@@ -811,11 +942,14 @@ function main() {
   browser.runtime.onMessage.addListener(processRuntimeMessage);
   browser.runtime.onConnect.addListener(portConnect);
 
-  (globalThis as any).backgroundSerivce = Object.freeze({
+  (globalThis as any).backgroundService = Object.freeze({
     serviceState,
     processRuntimeMessage,
     setCurrentTabAsActiveTab,
-    getAllTabs: () => browser.tabs.query({})
+    getAllTabs: () => browser.tabs.query({}),
+    broadcastPackagedStateToRuntime,
+    openNotifications,
+    clearNotifications
   });
 }
 
