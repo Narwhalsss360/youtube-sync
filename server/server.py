@@ -7,11 +7,12 @@ from websockets.asyncio.server import serve, Server, ServerConnection
 from websockets import ConnectionClosed, ConnectionClosedOK
 from json import loads, JSONDecodeError, dumps
 from sys import argv, stderr, stdout
-from npycli import CLIError, Command, DefaultPreview, CLI, EmptyEntriesError, ParsingError  # pyright: ignore[reportMissingTypeStubs]
-from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, ANSIControl, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION, strip_ansi  # pyright: ignore[reportMissingTypeStubs]
+from npycli import CLIError, Command, DefaultPreview, CLI, Description, EmptyEntriesError, ParsingError  # pyright: ignore[reportMissingTypeStubs]
+from npycli.ansi import BACKGROUND_BLUE, BACKGROUND_RED, BACKGROUND_YELLOW, SCR_RESET, SET_BOLD_MODE, send_ansi, CURSOR_DOWN, CURSOR_UP, INSERT_NEW_LINE, SAVE_CURRENT_CURSOR_POSITION, RESTORE_SAVED_CURSOR_POSITION, SELECT_CHARACTER_RENDITION, strip_ansi  # pyright: ignore[reportMissingTypeStubs]
 from npycli.parsing import create_enum_parser, create_literal_parser  # pyright: ignore[reportMissingTypeStubs]
 from npycli.parameters import BypassParse, CommandParameter  # pyright: ignore[reportMissingTypeStubs]
-from asyncio import iscoroutine, run, Task, create_task, gather, Future, to_thread, CancelledError
+from asyncio import iscoroutine, run, Task, create_task, gather, Future, to_thread, CancelledError, AbstractEventLoop, get_event_loop, wait_for
+from socket import socket, AddressFamily, SocketKind, IPPROTO_TCP
 from uuid import uuid4
 from pathlib import Path
 from logging import Handler, LogRecord
@@ -28,6 +29,13 @@ import logging
 import time
 import subprocess
 
+
+HEARTBEAT_INTERVAL: float = 0.1
+KEEP_ALIVE_INTERVAL: float = 20
+DEFAULT_LOG_PATH: str = "server.log"
+REMOTE_PORT: int = 32013
+REMOTE_CLI_STEP_TIMEOUT: float = 8
+MESSAGE_DELIMITER: bytes = b'\n'
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -996,10 +1004,6 @@ async def connection_handler(connection: ServerConnection) -> None:
             await handle_disconnect(this_user)
 
 
-HEARTBEAT_INTERVAL: float = 0.1
-KEEP_ALIVE_INTERVAL: float = 20
-
-
 def heartbeat(server: Server) -> None:
     if not server.is_serving():
         return
@@ -1092,6 +1096,24 @@ def print_above(*args: Any, max_columns: int, sep: str | None = " ", file: TextI
     send_ansi(CURSOR_DOWN.with_args(line_count), file=file, flush=True)
 
 
+def emit_record_fmt(ansi: bool, record: LogRecord) -> str:
+    scr: str
+    scr_reset: str = str(SELECT_CHARACTER_RENDITION.with_args(SCR_RESET)) if ansi else ""
+    if record.levelno <= LevelNames.info:
+        scr = str(SELECT_CHARACTER_RENDITION.with_args(BACKGROUND_BLUE)) if ansi else ""
+    elif record.levelno <= LevelNames.warning:
+        scr = str(SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_YELLOW)) if ansi else ""
+    else:
+        scr = str(SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_RED)) if ansi else ""
+
+    msg = (
+        f"{scr}{datetime.datetime.now().isoformat()} {record.levelname}:{scr_reset} "
+        f"{record.getMessage()}"
+    )
+
+    return msg
+
+
 class CommandLineInterfaceHandler(Handler):
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
@@ -1100,23 +1122,14 @@ class CommandLineInterfaceHandler(Handler):
     def emit(self, record: LogRecord) -> None:
         try:
             file: TextIO
-            scr: ANSIControl
-            scr_reset: ANSIControl = SELECT_CHARACTER_RENDITION.with_args(SCR_RESET)
             if record.levelno <= LevelNames.info:
-                scr = SELECT_CHARACTER_RENDITION.with_args(BACKGROUND_BLUE)
                 file = stdout
             elif record.levelno <= LevelNames.warning:
-                scr = SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_YELLOW)
                 file = stdout
             else:
-                scr = SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_RED)
-
                 file = stderr
-            msg = (
-                f"{scr}{datetime.datetime.now().isoformat()} {record.levelname}:{scr_reset} "
-                f"{record.getMessage()}"
-            )
 
+            msg: str = emit_record_fmt(file.isatty(), record)
             printer = print if self.command_result_logging else partial(print_above, max_columns=get_terminal_size().columns)
             printer(msg, file=file)
         except Exception:
@@ -1133,6 +1146,40 @@ def format_exc(e: BaseException, tabstr: str = "  ", inner_exc_tabs: int = 1) ->
 cli_handler: CommandLineInterfaceHandler = CommandLineInterfaceHandler()
 file_handler: Optional[logging.FileHandler] = None
 cli: CLI = CLI("server")
+
+
+@dataclass
+class RemoteInitialization:
+    stdout_isatty: bool
+    stderr_isatty: bool
+
+
+@dataclass
+class UserInputRequest:
+    prompt: str
+
+
+@dataclass
+class UserInput:
+    args: list[str]
+
+
+class OutputDirection(str, Enum):
+    stdout = "stdout"
+    stderr = "stderr"
+
+
+@dataclass
+class Output:
+    direction: OutputDirection
+    output: str
+    end: str = field(default="\n")
+
+
+@dataclass
+class CommandResult:
+    logs: list[LogRecord] = field(default_factory=lambda: [])
+    outputs: list[Output] = field(default_factory=lambda: [])
 
 
 class UserError(Exception):
@@ -1222,14 +1269,17 @@ def wrap_dc_str(instance: Any, tabs: int = 0, repr_function: Callable[[Any], str
 
 
 @cli.cmd(help="See a list of the currently connected users.")
-def users(uuids: bool = False) -> None:
+def users(uuids: bool = False) -> CommandResult:
+    result: CommandResult = CommandResult()
     for user in connected_users_by_uuid.values():
-        print(f"{(f"{user.uuid}: " if uuids else "")}{user.username}")
+        result.outputs.append(Output(OutputDirection.stdout, f"{(f"{user.uuid}: " if uuids else "")}{user.username}"))
+
+    return result
 
 
 @cli.cmd(help="See user details")
-def details(user: UserSpec) -> None:
-    print(wrap_dc_str(user))
+def details(user: UserSpec) -> CommandResult:
+    return CommandResult(outputs=[Output(OutputDirection.stdout, wrap_dc_str(user))])
 
 
 @cli.cmd(help="Send a notification to a user.")
@@ -1265,16 +1315,28 @@ async def shell_cmd(*args: BypassParse) -> None:
     await to_thread(subprocess.run, args, shell=True)
 
 
+@cli.cmd(names=("cat", "type", "logs"), help="Dump the contents of the log file")
+def cat_logs(lines: int) -> CommandResult:
+    assert file_handler is not None
+    with open(file_handler.baseFilename, "r") as log:
+        readlines: list[str] = log.readlines()
+        if lines >= 0:
+            readlines = readlines[-min(lines, len(readlines)):]
+        return CommandResult(outputs=[Output(
+            OutputDirection.stdout,
+            "".join(readlines)
+        )])
+
+
 @cli.cmd(names=("help", "h"))
-def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] = None, extended: bool = False) -> None:
+def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] = None, extended: bool = False) -> CommandResult:
     if extended:
         command_help, parameter_help = Command.extended_command_help, CommandParameter.extended_parameter_help
     else:
         command_help, parameter_help = Command.basic_command_help, CommandParameter.basic_parameter_help
 
     if command_name is None:
-        print("\n\n".join(command_help(cmd) for cmd in cli.commands))
-        return
+        return CommandResult(outputs=[Output(OutputDirection.stdout, "\n\n".join(command_help(cmd) for cmd in cli.commands))])
 
     if (command := cli.get_command(command_name)) is None:
         raise UserError(npycli.command.cmd(help_cmd), f"{command_name} is not a command.")
@@ -1282,21 +1344,183 @@ def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] =
     if parameter_name is not None:
         if (parameter := next(filter(lambda p: parameter_name in p.names, command.parameters)), None) is None:  # type: ignore
             raise UserError(npycli.command.cmd(help_cmd), f"'{parameter_name}' is not a parameter")
-        print(parameter_help(parameter))
-        return
+        return CommandResult(outputs=[Output(OutputDirection.stdout, parameter_help(parameter))])
 
-    print(f"{command_help(command)}; {command.help}")
+    return CommandResult(outputs=[Output(OutputDirection.stdout, f"{command_help(command)}; {command.help}")])
 
 
-DEFAULT_LOG_PATH: str = "server.log"
 cli.parsers[LevelNames] = create_enum_parser(LevelNames)
+
+
+async def local_cli(server: Server) -> None:
+    while server.is_serving():
+        user_input_task: Task[str] = create_task(input_async(cli.prompt_entry_marker))
+        server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
+        try:
+            user_input: str = await user_input_task
+        except EOFError:
+            await asyncio.sleep(30)
+            continue
+
+        try:
+            entries: list[str] = split(user_input)
+        except Exception as exc:
+            print(f"{"\n".join(f"{e.__class__.__name__}: {e}" for e in causes(exc, True))}", file=stderr)
+            continue
+
+        try:
+            cli_handler.command_result_logging = True
+            retval: Any = cli.exec(entries)
+        except EmptyEntriesError:
+            cli_handler.command_result_logging = False
+            continue
+        except (CLIError, UserError) as err:
+            if isinstance(err, CLIError) and err.__cause__:
+                err = err.__cause__
+            logger.error(format_exc(err))
+            cli_handler.command_result_logging = False
+            continue
+        finally:
+            cli_handler.command_result_logging = False
+
+        if iscoroutine(retval):
+            retval = await retval
+
+        if isinstance(retval, CommandResult):
+            for log in retval.logs:
+                logger.handle(log)
+            for output in retval.outputs:
+                print(output.output, end=output.end, file=stdout if output.direction == OutputDirection.stdout else stderr)
+
+
+async def recv_line(sock: socket) -> bytearray:
+    received: bytearray = bytearray()
+    loop: AbstractEventLoop = get_event_loop()
+
+    while True:
+        b: bytes = await loop.sock_recv(sock, 1)
+        if not b:
+            raise EOFError()
+
+        if b[0] == ord('\n'):
+            break
+        received.append(b[0])
+
+    return received
+
+
+async def remote_cli(server: Server) -> None:
+    @cli.retvals()
+    def retvals(command: Command, return_value: Optional[Any]) -> Optional[Any]:
+        return command, return_value
+
+    def log_prefix(s: Any) -> str:
+        return f"[{remote_cli.__name__}] {s}"
+
+    loop: AbstractEventLoop = get_event_loop()
+
+    with socket(AddressFamily.AF_INET, SocketKind.SOCK_STREAM, IPPROTO_TCP) as listener:
+        listener.setblocking(False)
+        listener.bind(("127.0.0.1", REMOTE_PORT))
+        listener.listen(1)
+
+        while server.is_serving():
+            accept_task = create_task(loop.sock_accept(listener))
+            server.closed_waiter.add_done_callback(lambda _: accept_task.cancel())
+            client, client_addr = await accept_task
+            logger.info(f"{client_addr} connected.")
+
+            try:
+                initialization_json: str = (await wait_for(recv_line(client), timeout=REMOTE_CLI_STEP_TIMEOUT)).decode()
+            except EOFError:
+                logger.info(log_prefix("Disconnected"))
+                client.close()
+                continue
+            except TimeoutError:
+                logger.error(log_prefix("Timed our waiting for initialization"))
+                continue
+
+            try:
+                initialization: RemoteInitialization = RemoteInitialization(**loads(initialization_json))
+            except TypeError as e:
+                logger.error(log_prefix(e))
+                client.close()
+                continue
+            logger.info(log_prefix(f"{remote_cli.__name__}> {initialization}"))
+
+            request: UserInputRequest = UserInputRequest(prompt=cli.prompt_entry_marker)
+            client.send(dumps(asdict(request)).encode() + MESSAGE_DELIMITER)
+            logger.info(log_prefix(f"{remote_cli.__name__}> {request}"))
+
+            try:
+                user_input_json: str = (await wait_for(recv_line(client), timeout=REMOTE_CLI_STEP_TIMEOUT)).decode()
+            except EOFError:
+                logger.info(log_prefix("Disconnected"))
+                client.close()
+                continue
+            except TimeoutError:
+                logger.error(log_prefix("Timed our waiting for user input"))
+                continue
+
+            try:
+                user_input: UserInput = UserInput(**loads(user_input_json))
+            except TypeError as e:
+                logger.error(log_prefix(e))
+                client.close()
+                continue
+
+            return_value: Any = None
+            try:
+                retval_unsafe: Any = cli.exec(user_input.args)
+                assert isinstance(retval_unsafe, tuple)
+                assert len(retval_unsafe) == 2
+                assert isinstance(retval_unsafe[0], Command)
+                command: Command = retval_unsafe[0]
+                return_value = retval_unsafe[1]
+                if iscoroutine(return_value):
+                    task: Task[Any] = create_task(return_value)
+                    server.closed_waiter.add_done_callback(lambda _: task.cancel())
+                    return_value = await task
+                outputs: list[Output]
+                if isinstance(return_value, CommandResult):
+                    outputs = return_value.outputs
+                    for log in return_value.logs:
+                        logger.handle(log)
+                    for output in return_value.outputs:
+                        print(output.output, end=output.end, file=stdout if output.direction == OutputDirection.stdout else stderr)
+                elif return_value is not None:
+                    outputs = [Output(OutputDirection.stdout, str(return_value))]
+                else:
+                    outputs = []
+
+                response: list[dict[str, str]] = [asdict(output) for output in outputs]
+                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
+                logger.info(log_prefix(f"< ({command.name}) {response}"))
+            except EmptyEntriesError as err:
+                response = [asdict(Output(
+                    OutputDirection.stderr,
+                    f"{err.__class__.__name__}: {err.args[0]}"
+                ))]
+                logger.info(log_prefix(f"< {response}"))
+                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
+            except (CLIError, UserError) as err:
+                response = [asdict(Output(
+                    OutputDirection.stderr,
+                    f"{err.__class__.__name__}: {err.args[0]}"
+                ))]
+                logger.error(format_exc(err))
+                logger.info(log_prefix(f"< {response}"))
+                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
+            finally:
+                client.close()
 
 
 async def main(
     host: str,
     port: int,
     log_level: LevelNames = LevelNames.notset,
-    log_file: Annotated[Optional[Path], DefaultPreview(DEFAULT_LOG_PATH)] = None
+    log_file: Annotated[Optional[Path], DefaultPreview(DEFAULT_LOG_PATH)] = None,
+    remote: Annotated[bool, Description("Run server in remote mode")] = False
 ) -> int:
     log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
     log_file = log_file or Path(__file__).parent.joinpath(Path(DEFAULT_LOG_PATH))
@@ -1320,38 +1544,10 @@ async def main(
         initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
 
         try:
-            while server.is_serving():
-                user_input_task: Task[str] = create_task(input_async(cli.prompt_entry_marker))
-                server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
-                try:
-                    user_input: str = await user_input_task
-                except EOFError:
-                    await asyncio.sleep(30)
-                    continue
-
-                try:
-                    entries: list[str] = split(user_input)
-                except Exception as exc:
-                    print(f"{"\n".join(f"{e.__class__.__name__}: {e}" for e in causes(exc, True))}", file=stderr)
-                    continue
-
-                try:
-                    cli_handler.command_result_logging = True
-                    retval: Any = cli.exec(entries)
-                except EmptyEntriesError:
-                    cli_handler.command_result_logging = False
-                    continue
-                except (CLIError, UserError) as err:
-                    if isinstance(err, CLIError) and err.__cause__:
-                        err = err.__cause__
-                    logger.error(format_exc(err))
-                    cli_handler.command_result_logging = False
-                    continue
-                finally:
-                    cli_handler.command_result_logging = False
-
-                if iscoroutine(retval):
-                    await retval
+            if remote:
+                await remote_cli(server)
+            else:
+                await local_cli(server)
         except (CancelledError, KeyboardInterrupt):
             if server.is_serving():
                 server.close()
