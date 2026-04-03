@@ -431,6 +431,7 @@ function processServerMessage(message: Message) {
       console.warn(`Server at ${serviceState.serverConnection.url}`);
       console.warn("Message:");
       console.warn(message);
+      console.warn(JSON.stringify(message));
       console.groupEnd();
       break;
     }
@@ -508,6 +509,7 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       console.warn(port);
       console.warn("Message:");
       console.warn(message);
+      console.warn(JSON.stringify(message));
       console.groupEnd();
       return;
     }
@@ -832,6 +834,7 @@ function processRuntimeMessage(
       console.warn(sender);
       console.warn("Message:");
       console.warn(message);
+      console.warn(JSON.stringify(message));
       console.groupEnd();
       return;
     }

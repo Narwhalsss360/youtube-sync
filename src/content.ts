@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isAcknowledgeMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  isAcknowledgeMessage, isErrorMessage, isGenericMessage, isNotifyMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: boolean,
@@ -285,6 +285,10 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
   });
 }
 
+const PLAYBACK_SYNC_NOTIFICATION_INTERVAL: number = 60000;
+let notifyOfPlaybackSynchronization: boolean = true;
+let mouseX: number = 0;
+
 function follow(user: User): Promise<void> {
   if (user.videoInfo === null) {
     console.log("Following a user that is not watching a video. Doing nothing");
@@ -297,6 +301,11 @@ function follow(user: User): Promise<void> {
   }
 
   return waitForVideoElement().then(video => {
+    const controls: HTMLElement | null = document.querySelector(".ytp-chrome-bottom");
+    const showConrols = controls === null ? () => {} : () => {
+      controls.dispatchEvent(new MouseEvent("mousemove",  { bubbles: true, cancelable: false, clientX: mouseX }));
+      mouseX = mouseX === 0 ? 1 : 0;
+    };
     if (user.videoInfo === null) {
       return;
     }
@@ -308,33 +317,104 @@ function follow(user: User): Promise<void> {
     if (user.videoInfo.playbackInfo.state === PlaybackState.Waiting) {
       if (!video.paused) {
         video.pause();
+        video.currentTime = user.videoInfo.playbackInfo.currentTime;
+        const notifyMessage: NotifyMessage = {
+          type: MessageTypes.Notify,
+          notification: {
+            epoch: Date.now(),
+            sender: "Follower",
+            message: `${user.username} is buffering.`,
+            dismissed: false
+          }
+        };
+        browser.runtime.sendMessage(notifyMessage);
+        showConrols();
       }
-      video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      notifyOfPlaybackSynchronization = true;
       return
     }
 
     if (user.videoInfo.playbackInfo.playbackRate !== video.playbackRate) {
       video.playbackRate = user.videoInfo.playbackInfo.playbackRate;
+      const notifyMessage: NotifyMessage = {
+        type: MessageTypes.Notify,
+        notification: {
+          epoch: Date.now(),
+          sender: "Follower",
+          message: `${user.username} playback rate synchronization: ${video.playbackRate}.`,
+          dismissed: false
+        }
+      };
+      browser.runtime.sendMessage(notifyMessage);
+      showConrols();
     }
 
     if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
       if (!video.paused) {
         video.pause();
+        const notifyMessage: NotifyMessage = {
+          type: MessageTypes.Notify,
+          notification: {
+            epoch: Date.now(),
+            sender: "Follower",
+            message: `${user.username} playback rate synchronization: ${video.playbackRate}.`,
+            dismissed: false
+          }
+        };
+        browser.runtime.sendMessage(notifyMessage);
+        showConrols();
       }
       if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
         video.currentTime = user.videoInfo.playbackInfo.currentTime;
+        const notifyMessage: NotifyMessage = {
+          type: MessageTypes.Notify,
+          notification: {
+            epoch: Date.now(),
+            sender: "Follower",
+            message: `${user.username} syncrhonizing paused time.`,
+            dismissed: false
+          }
+        };
+        browser.runtime.sendMessage(notifyMessage);
       }
+      notifyOfPlaybackSynchronization = true;
       return;
     }
 
     if (video.paused) {
       video.currentTime = user.videoInfo.playbackInfo.currentTime;
       video.play();
+      const notifyMessage: NotifyMessage = {
+        type: MessageTypes.Notify,
+        notification: {
+          epoch: Date.now(),
+          sender: "Follower",
+          message: `${user.username} playing.`,
+          dismissed: false
+        }
+      };
+      showConrols();
+      browser.runtime.sendMessage(notifyMessage);
       return;
     }
 
     if (Math.abs(user.videoInfo.playbackInfo.currentTime - video.currentTime) > moduleState.maxDeviation) {
       video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      if (notifyOfPlaybackSynchronization) {
+        const notifyMessage: NotifyMessage = {
+          type: MessageTypes.Notify,
+          notification: {
+            epoch: Date.now(),
+            sender: "Follower",
+            message: `${user.username} synchronizing playback time.`,
+            dismissed: false
+          }
+        };
+        browser.runtime.sendMessage(notifyMessage);
+        notifyOfPlaybackSynchronization = false;
+        showConrols();
+        setTimeout(() => notifyOfPlaybackSynchronization = true, PLAYBACK_SYNC_NOTIFICATION_INTERVAL);
+      }
     }
   });
 }
@@ -405,6 +485,7 @@ function processPortMessage(
       console.warn(port);
       console.warn("Message:");
       console.warn(message);
+      console.warn(JSON.stringify(message));
       console.groupEnd();
       return;
     }

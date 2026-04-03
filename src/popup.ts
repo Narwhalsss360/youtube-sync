@@ -1,12 +1,44 @@
 import { ErrorMessageReceived } from "./errors";
 import browser = chrome;
-import { asType, ConnectToServerAsMessage, detectUserUpdates, detectVideoInfoUpdates, DisconnectFromServerMessage, FollowMessage, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isUser, Message, MessageTypes, PackagedServiceState, PlaybackState, SetActiveTabMessage, StopFollowingMessage, User, userDefaults,wellDefined,wellDefinedMessage } from "./types";
+import {
+  asType,
+  ConnectToServerAsMessage,
+  detectUserUpdates,
+  detectVideoInfoUpdates,
+  DisconnectFromServerMessage,
+  FollowMessage,
+  isErrorMessage,
+  isGenericMessage,
+  isPackagedServiceStateMessage,
+  isUser,
+  Message,
+  MessageTypes,
+  PackagedServiceState,
+  PlaybackState,
+  SetActiveTabMessage,
+  StopFollowingMessage,
+  User,
+  userDefaults,
+  wellDefined,
+  wellDefinedMessage,
+  Notification,
+  NotificationDismissedMessage,
+  isOpenNotificationsMessage
+} from "./types";
 
 function constructBadDOMError(message: string, element: HTMLElement | null | undefined = undefined): Error {
   return element ?
-    new Error(`Bad DOM Error: ${element.tagName}#${element.id}`) :
-    new Error("Bad DOM Error");
+    new Error(`Bad DOM Error (${element.tagName}#${element.id}): ${message}`) :
+    new Error("Bad DOM Error: ${message}");
 }
+
+const notificationsToggle: HTMLButtonElement = wellDefined(
+    asType<HTMLButtonElement>(
+    (element: HTMLElement) => element instanceof HTMLButtonElement,
+    document.getElementById("notifications-toggle")
+  ),
+  constructBadDOMError("Bad notifications-toggle")
+);
 
 const activeTabToggle: HTMLButtonElement = wellDefined(
     asType<HTMLButtonElement>(
@@ -66,6 +98,7 @@ const disconnectServerAddress: HTMLInputElement = wellDefined(
 
 const popupState : {
   usersDiv: HTMLDivElement,
+  notificationsDiv: HTMLDivElement,
   packagedServiceState: PackagedServiceState
   usersWithSelf: () => Array<User>
 } = {
@@ -74,7 +107,14 @@ const popupState : {
       (element: HTMLElement) => element instanceof HTMLDivElement,
       document.getElementById("users")
     ),
-    constructBadDOMError("This element must exist in the DOM.")
+    constructBadDOMError("The 'users' element must exist in the DOM.")
+  ),
+  notificationsDiv: wellDefined(
+    asType<HTMLDivElement>(
+      (element: HTMLElement) => element instanceof HTMLDivElement,
+      document.getElementById("notifications")
+    ),
+    constructBadDOMError("The 'notifications' element must exist in the DOM.")
   ),
   packagedServiceState: {
     user: userDefaults,
@@ -249,8 +289,6 @@ function attachDataToUserContainer(div: HTMLDivElement, user: User): HTMLDivElem
     return div;
   }
 
-  const isThisUser = user.uuid === popupState.packagedServiceState.user.uuid;
-
   div.innerHTML = String.raw
  `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div username">${user.username}</div>
   <div id="${userElementIdPrefix(user.uuid, "video-info")}" class="video-info">
@@ -413,6 +451,62 @@ function updateUserData(previousUserData: User | undefined, user: User): void {
   ensureEventsAreRegistered(div, user);
 }
 
+function notificationElementIdPrefix(notification: Notification): string {
+  return `notification-${notification.epoch}-${notification.sender}`;
+}
+
+function constructNotificationDataElement(notification: Notification): HTMLDivElement {
+  const prefix: string = notificationElementIdPrefix(notification);
+  const notificationDiv: HTMLDivElement = document.createElement("div");
+  notificationDiv.classList.add("notification");
+  notificationDiv.id = prefix;
+
+  const controlButton: string = notification.dismissed ?
+    `` :
+    `<button id"${prefix}-dismiss" class="dismiss-notification-button">Dismiss</button>`;
+
+  notificationDiv.innerHTML =
+   `<div class="text-div notification-header" ${notification.dismissed ? 'style="text-decoration: line-through"' : ""}>
+      ${new Date(notification.epoch).toISOString()}:&nbsp;<b>${notification.sender}</b>
+    </div>
+    <div class="text-div">
+      <p>${notification.message}</p>
+    </div>
+    <div class="notifications-control">
+      ${controlButton}
+    </div>`;
+
+  const dismissButton: HTMLButtonElement | null = notificationDiv.querySelector(`button`);
+  if (dismissButton !== null) {
+    dismissButton.addEventListener("click", () => {
+      dismissButton.disabled = true;
+      const notificationDismissedMessage: NotificationDismissedMessage = {
+        type: MessageTypes.NotificationDismissed,
+        notification
+      };
+      browser.runtime.sendMessage(notificationDismissedMessage);
+    });
+  }
+
+  return notificationDiv;
+}
+
+function updateNotificationData(notification: Notification): void {
+  const prefix: string = notificationElementIdPrefix(notification);
+  const constructed: HTMLDivElement = constructNotificationDataElement(notification);
+  let existing: HTMLElement | undefined = asType<HTMLDivElement>(
+    (element) => element instanceof HTMLDivElement,
+    document.getElementById(prefix)
+  );
+
+  if (existing == undefined) {
+    existing = constructed;
+    popupState.notificationsDiv.appendChild(existing);
+  } else {
+    existing.innerHTML = constructed.innerHTML;
+  }
+}
+
 function applyState(newState: PackagedServiceState) {
   const withSelf = popupState.usersWithSelf();
   popupState.packagedServiceState = newState;
@@ -432,6 +526,19 @@ function applyState(newState: PackagedServiceState) {
     }
   } else {
     popupState.usersDiv.replaceChildren();
+  }
+
+  for (const newNotificationInfo of newState.notifications.toReversed()) {
+    updateNotificationData(newNotificationInfo);
+  }
+
+  if (popupState.notificationsDiv.children.length !== 0) {
+    for (const noitificationDivAsAnyElement of Array.from(popupState.notificationsDiv.children)) {
+      const notificationDiv = noitificationDivAsAnyElement as HTMLDivElement;
+      if (!newState.notifications.find(notification => notificationElementIdPrefix(notification) === notificationDiv.id)) {
+        notificationDiv.remove()
+      }
+    }
   }
 
   getActiveTab().then(tab => {
@@ -474,6 +581,8 @@ function processRuntimeMessage(
   sender: browser.runtime.MessageSender,
   sendResponse: (response?: any) => void
 ): boolean | Promise<any> | undefined {
+  sendResponse as unknown as void;
+
   if (!isGenericMessage(message)) {
     throw new Error("Recieved unknown message");
   }
@@ -496,15 +605,38 @@ function processRuntimeMessage(
       ).packagedServiceState);
       break;
     }
+    case MessageTypes.OpenNotifications: {
+      wellDefinedMessage(isOpenNotificationsMessage, MessageTypes.OpenNotifications, message);
+      if (popupState.notificationsDiv.hidden) {
+        notificationsToggle.click();
+      }
+      break;
+    }
+    case MessageTypes.Notify: {
+      break;
+    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");
       console.warn(sender);
       console.warn("Message:");
       console.warn(message);
+      console.warn(JSON.stringify(message));
       console.groupEnd();
       return;
     }
+  }
+}
+
+function notificationsToggleActivated() {
+  if (popupState.notificationsDiv.hidden) {
+    setHidden(popupState.usersDiv, true);
+    setHidden(popupState.notificationsDiv, false);
+    notificationsToggle.style.backgroundColor = "";
+  } else {
+    setHidden(popupState.notificationsDiv, true);
+    setHidden(popupState.usersDiv, false);
+    notificationsToggle.style.backgroundColor = "darkgray";
   }
 }
 
@@ -581,6 +713,7 @@ async function main() {
   ).packagedServiceState);
 
   browser.runtime.onMessage.addListener(processRuntimeMessage);
+  notificationsToggle.addEventListener("click", notificationsToggleActivated);
   activeTabToggle.addEventListener("click", activeTabToggleActivated);
   connectAsForm.addEventListener("submit", connectAsFormSubmitted);
   disconnectForm.addEventListener("submit", disconnectFormSubmitted);
@@ -593,12 +726,9 @@ async function main() {
   };
 }
 
-if (false) {
-  const debugInterval = setInterval(() => {
-    clearInterval(debugInterval);
-    debugger;
-    main();
-  }, 500);
-} else {
+const debugInterval = setInterval(() => {
+  clearInterval(debugInterval);
+  debugger;
   main();
-}
+}, 500);
+// main();
