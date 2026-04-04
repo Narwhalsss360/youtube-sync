@@ -231,7 +231,7 @@ function constructUserStatusInnerHTML(user: User): string {
     );
   }
 
-  if (user.uuid !== popupState.packagedServiceState.user.uuid) {
+  if (user.uuid !== popupState.packagedServiceState.user.uuid && user.videoInfo?.isLive !== true) {
     if (popupState.packagedServiceState.user.followingUUID === user.uuid) {
       innerHTML += (
         `<button id="${userElementIdPrefix(user.uuid, "toggle-follow-button")}" value="stop">Stop following</button>`

@@ -175,6 +175,7 @@ class VideoInfo:
     channel: str
     channelImageUrl: str
     duration: float
+    isLive: bool
     playbackInfo: PlaybackInfo
 
     @classmethod
@@ -225,6 +226,14 @@ class VideoInfo:
             float,
             "duration",
             parsed.duration,
+            False
+        ))
+
+        parsed.isLive = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            bool,
+            "isLive",
+            parsed.isLive,
             False
         ))
 
@@ -928,8 +937,11 @@ async def handle_non_clerical_message(this_user: User, message: ReceivableMessag
         if this_user.uuid == message.followingUUID:
             await send_to(this_user, ErrorMessage("Cannot follow self.", "Server"), logging.ERROR)
             return
-        if next(filter(lambda u: u.uuid == message.followingUUID, connected_users_by_uuid.values()), None) is None:
+        if (following := next(filter(lambda u: u.uuid == message.followingUUID, connected_users_by_uuid.values()), None)) is None:
             await send_to(this_user, ErrorMessage(f"User uuid {message.followingUUID} does not exist.", "Server"), logging.ERROR)
+            return
+        if following.videoInfo is not None and following.videoInfo.isLive:
+            await send_to(this_user, ErrorMessage("Cannot follow someone watching a live video", "Server"), logging.ERROR)
             return
         this_user.followingUUID = message.followingUUID
         update_following_info()

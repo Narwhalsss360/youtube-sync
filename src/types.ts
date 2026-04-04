@@ -123,6 +123,7 @@ export interface VideoInfo {
   channel: string,
   channelImageUrl: string,
   duration: number,
+  isLive: boolean,
   playbackInfo: PlaybackInfo
 };
 

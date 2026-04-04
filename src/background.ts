@@ -739,6 +739,27 @@ function processRuntimeMessage(
         return;
       }
 
+      const following: User | undefined = serviceState.users.find(user => user.uuid === followMessage.followingUUID);
+      if (following === undefined) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: `User with UUID ${followMessage.followingUUID} does not exist.`,
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        break;
+      }
+
+      if (following.videoInfo?.isLive ?? false) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: `Cannot follow ${following.uuid}, they're watching a live video.`,
+          sender: "Background Service Worker"
+        }
+        sendResponse(errorMessage);
+        break;
+      }
+
       if (serviceState.pendingServerRequests.find(pending => [MessageTypes.Follow, MessageTypes.StopFollowing].includes(pending.type))) {
         const errorMessage: ErrorMessage = {
           type: MessageTypes.Error,

@@ -69,6 +69,7 @@ function waitForMetadata(): Promise<VideoInfo> {
     let title: string | null = null;
     let channel: string | null = null;
     let channelImageUrl: string | null = null;
+    let isLive: boolean | null = null;
 
     let resolved: boolean = false;
 
@@ -94,6 +95,12 @@ function waitForMetadata(): Promise<VideoInfo> {
            if (stack) {
             channelImageUrl = stack.values().toArray().at(-1)?.src ?? null;
            }
+        }
+      }
+      if (isLive === null) {
+        const badgeWidth: number | undefined = document.querySelector(".ytp-live-badge")?.clientWidth;
+        if (badgeWidth !== undefined) {
+          isLive = badgeWidth > 0;
         }
       }
 
@@ -123,7 +130,8 @@ function waitForMetadata(): Promise<VideoInfo> {
         !title ||
         !channel ||
         !channelImageUrl ||
-        !videoElement
+        !videoElement ||
+        isLive === null
       ) {
         return;
       }
@@ -144,6 +152,7 @@ function waitForMetadata(): Promise<VideoInfo> {
         channel,
         channelImageUrl,
         duration: videoElement.duration,
+        isLive,
         playbackInfo: {
           state: videoPlaybackState(videoElement),
           currentTime: videoElement.currentTime,
