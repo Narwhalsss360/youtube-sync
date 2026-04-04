@@ -302,7 +302,7 @@ function follow(user: User): Promise<void> {
 
   return waitForVideoElement().then(video => {
     const controls: HTMLElement | null = document.querySelector(".ytp-chrome-bottom");
-    const showConrols = controls === null ? () => {} : () => {
+    const showControls = controls === null ? () => {} : () => {
       controls.dispatchEvent(new MouseEvent("mousemove",  { bubbles: true, cancelable: false, clientX: mouseX }));
       mouseX = mouseX === 0 ? 1 : 0;
     };
@@ -328,7 +328,7 @@ function follow(user: User): Promise<void> {
           }
         };
         browser.runtime.sendMessage(notifyMessage);
-        showConrols();
+        showControls();
       }
       notifyOfPlaybackSynchronization = true;
       return
@@ -346,7 +346,7 @@ function follow(user: User): Promise<void> {
         }
       };
       browser.runtime.sendMessage(notifyMessage);
-      showConrols();
+      showControls();
     }
 
     if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
@@ -362,7 +362,7 @@ function follow(user: User): Promise<void> {
           }
         };
         browser.runtime.sendMessage(notifyMessage);
-        showConrols();
+        showControls();
       }
       if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
         video.currentTime = user.videoInfo.playbackInfo.currentTime;
@@ -393,7 +393,7 @@ function follow(user: User): Promise<void> {
           dismissed: false
         }
       };
-      showConrols();
+      showControls();
       browser.runtime.sendMessage(notifyMessage);
       return;
     }
@@ -412,7 +412,7 @@ function follow(user: User): Promise<void> {
         };
         browser.runtime.sendMessage(notifyMessage);
         notifyOfPlaybackSynchronization = false;
-        showConrols();
+        showControls();
         setTimeout(() => notifyOfPlaybackSynchronization = true, PLAYBACK_SYNC_NOTIFICATION_INTERVAL);
       }
     }
