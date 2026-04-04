@@ -169,6 +169,95 @@ class PlaybackInfo:
 
 
 @dataclass
+class QueuedVideoInfo:
+    videoId: str
+    title: str
+    channel: str
+
+    @classmethod
+    def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
+        if isinstance(data, cls):
+            return data
+        assert isinstance(data, dict)
+
+        try:
+            parsed: Self = cls(**data)
+        except TypeError as e:
+            raise DataParseError(cls, *e.args)
+
+        parsed.videoId = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "videoId",
+            parsed.videoId,
+            False
+        ))
+
+        parsed.title = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "title",
+            parsed.title,
+            False
+        ))
+
+        parsed.channel = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "channel",
+            parsed.channel,
+            False
+        ))
+
+        return parsed
+
+
+@dataclass
+class VideoQueue:
+    videos: list[QueuedVideoInfo]
+    currentIndex: int
+    list: str | None
+
+    @classmethod
+    def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
+        if isinstance(data, cls):
+            return data
+        assert isinstance(data, dict)
+
+        try:
+            parsed: Self = cls(**data)
+        except TypeError as e:
+            raise DataParseError(cls, *e.args)
+
+        for i, value in zip(range(len(parsed.videos)), parsed.videos):
+            parsed.videos[i] = well_defined(ensure_constructed_rethrow_type_or_value_error(
+                cls,
+                QueuedVideoInfo,
+                f"videos[{i}]",
+                parsed.videos[i],
+                False
+            ))
+
+        parsed.currentIndex = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            int,
+            "currentIndex",
+            parsed.currentIndex,
+            False
+        ))
+
+        parsed.list = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "list",
+            parsed.list,
+            False
+        ))
+
+        return parsed
+
+
+@dataclass
 class VideoInfo:
     videoId: str
     title: str
@@ -246,6 +335,7 @@ class VideoInfo:
 class UserHostingOptions:
     cohostsUUID: list[str]
     waitForBufferingFollowers: bool
+    shareQueue: bool
 
     @classmethod
     def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
@@ -275,6 +365,14 @@ class UserHostingOptions:
             bool,
             "waitForBufferingFollowers",
             parsed.waitForBufferingFollowers,
+            False
+        ))
+
+        parsed.shareQueue = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            bool,
+            "shareQueue",
+            parsed.shareQueue,
             False
         ))
 
@@ -327,6 +425,7 @@ class User:
     videoInfo: VideoInfo | None = field(hash=False)
     followingUUID: str | None = field(hash=False)
     followerUUIDs: list[str] = field(hash=False)
+    videoQueue: VideoQueue | None = field(hash=False)
 
     def __post_init__(self) -> None:
         self.connection: ServerConnection
@@ -414,6 +513,14 @@ class User:
                 value,
                 False
             ))
+
+        parsed.videoQueue = ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            VideoQueue,
+            "videoQueue",
+            parsed.videoQueue,
+            True
+        )
 
         return parsed
 

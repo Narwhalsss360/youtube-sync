@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, wellDefinedMessage } from "./types";
+import {  arrayEquals, asType, detectQueuedVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, QueuedVideoInfo, QueueUpdateMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, VideoQueue, wellDefined, wellDefinedMessage } from "./types";
 
 const moduleState: {
   isActiveTab: boolean,
@@ -8,12 +8,16 @@ const moduleState: {
   backgroundServicePort: browser.runtime.Port | null,
   packagedServiceState: PackagedServiceState | null,
   maxDeviation: number,
+  cachedCurrentIndex: number | null,
+  cachedQueuedVideos: Array<QueuedVideoInfo> | null
 } = {
   isActiveTab: false,
   videoInfoCache: null,
   backgroundServicePort: null,
   packagedServiceState: null,
-  maxDeviation: 1
+  maxDeviation: 1,
+  cachedCurrentIndex: null,
+  cachedQueuedVideos: null
 };
 
 function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) => boolean): HTMLElement | null {
@@ -141,15 +145,16 @@ function waitForMetadata(): Promise<VideoInfo> {
       }
 
       disconnector.disconnect();
-      const videoId = new URLSearchParams(document.location.search).get("v");
+      const searchParams = new URLSearchParams(document.location.search);
+      const videoId = searchParams.get("v");
       if (videoId === null) {
         throw new Error("Metadata unavailable, video id is not available in the URL search params");
       }
 
       resolve({
         videoId,
-        title,
         channel,
+        title,
         channelImageUrl,
         duration: videoElement.duration,
         isLive,
@@ -186,6 +191,103 @@ function waitForMetadata(): Promise<VideoInfo> {
   });
 }
 
+async function detectQueue(onQueueChanged: (videos: Array<QueuedVideoInfo>, current: number) => void) {
+  const _existingPlaylist: HTMLElement | null = document.getElementById("playlist");
+  const playlist = _existingPlaylist ? _existingPlaylist : await (new Promise((resolve, _) => {
+    new MutationObserver((_, observer) => {
+      const playlist = document.getElementById("playlist");
+      if (playlist === null) {
+        return;
+      }
+      observer.disconnect();
+      resolve(playlist);
+    }).observe(document, { childList: true, subtree: true });
+  }) as Promise<HTMLElement>);
+
+  function updateUsingContainers(containers: Array<Element>): void {
+    let currentIndex: number = -1;
+    const asQueuedVideoInfo: Array<QueuedVideoInfo> = containers.map((container, index) => {
+      const anchorElement: HTMLAnchorElement = wellDefined(
+        asType<HTMLAnchorElement>(
+          (element: Element) => element instanceof HTMLAnchorElement,
+          container.querySelector("a")
+        ),
+        new Error("Expected <a> element in container")
+      );
+
+      const indexElement: HTMLSpanElement = wellDefined(
+        asType<HTMLSpanElement>(
+          (element: Element | null) => element instanceof HTMLSpanElement,
+          container.querySelector("#index"),
+        ),
+        new Error("'index' was expected to be <span> element")
+      );
+
+      const videoTitleElement: HTMLSpanElement = wellDefined(
+        asType<HTMLSpanElement>(
+          (element: Element | null) => element instanceof HTMLSpanElement,
+          container.querySelector("#video-title"),
+        ),
+        new Error("'video-title' was expected to be <span> element")
+      );
+
+      const bylineElement: HTMLSpanElement = wellDefined(
+        asType<HTMLSpanElement>(
+          (element: Element | null) => element instanceof HTMLSpanElement,
+          container.querySelector("#byline"),
+        ),
+        new Error("'byline' was expected to be <span> element")
+      );
+
+      let videoId: string | null;
+      if (indexElement.innerText === "▶") {
+        currentIndex = index;
+        videoId = new URLSearchParams(window.location.search).get("v");
+      } else {
+        videoId = new URL(anchorElement.href).searchParams.get("v");
+      }
+
+      if (videoId === null) {
+        throw new Error("Could not get videoId for video in queue.");
+      }
+
+      return {
+        videoId,
+        title: videoTitleElement.innerText,
+        channel: bylineElement.innerText
+      } satisfies QueuedVideoInfo;
+    });
+
+    if (
+      moduleState.cachedCurrentIndex !== null && moduleState.cachedQueuedVideos !== null &&
+      moduleState.cachedCurrentIndex === currentIndex &&
+      arrayEquals(moduleState.cachedQueuedVideos, asQueuedVideoInfo, (a, b) => detectQueuedVideoInfoUpdates(a, b).length === 0)
+    ) {
+      return;
+    }
+
+    moduleState.cachedQueuedVideos = asQueuedVideoInfo;
+    moduleState.cachedCurrentIndex = currentIndex;
+    onQueueChanged(asQueuedVideoInfo, currentIndex);
+  }
+
+  const items: HTMLElement = wellDefined(
+    asType<HTMLDivElement>(
+      (element: Element) => element instanceof HTMLDivElement,
+      playlist.querySelector("#items")
+    ),
+    new Error("'playlist' and items container are expected to not be null here.")
+  );
+
+  const containers = items.querySelectorAll("#container");
+  updateUsingContainers(Array.from(containers));
+
+  new MutationObserver(() => {
+    const containers = items.querySelectorAll("#container");
+    updateUsingContainers(Array.from(containers));
+  }).observe(items, { childList: true , subtree: true });
+}
+
 let ensureVideoInfoIsSentIntervalId: ReturnType<typeof setInterval> | null = null;
 const ENSURE_VIDEO_INFO_SENT_INTERVAL: number = 10;
 
@@ -208,7 +310,22 @@ function sendVideoInfo() {
     videoInfo: moduleState.videoInfoCache,
     uuid: null
   };
-  moduleState.backgroundServicePort.postMessage(videoInfoMessage);
+
+  try {
+    moduleState.backgroundServicePort.postMessage(videoInfoMessage);
+  } catch (err) {
+    try {
+      const setActiveTabMessage: SetActiveTabMessage = {
+        type: MessageTypes.SetActiveTab,
+        tabId: null
+      };
+      moduleState.backgroundServicePort.postMessage(setActiveTabMessage);
+    } catch {
+      moduleState.isActiveTab = false;
+    }
+
+    console.error(err);
+  }
 }
 
 function getPlaybackInfo(video: HTMLVideoElement): PlaybackInfo {
@@ -485,6 +602,14 @@ function processPortMessage(
         moduleState.isActiveTab = true;
         console.log("Is active YouTube Sync tab.");
         waitForVideoElement().then(video => registerVideoElementEvents(video));
+        moduleState.backgroundServicePort?.postMessage({
+          type: MessageTypes.QueueUpdate,
+          videoQueue: {
+            videos: moduleState.cachedQueuedVideos ?? [],
+            currentIndex: moduleState.cachedCurrentIndex ?? -1,
+            list: new URLSearchParams(window.location.search).get("list")
+          }
+        } satisfies QueueUpdateMessage);
       }
       break;
     }
@@ -535,18 +660,59 @@ function processRuntimeMessage(
 }
 
 function main() {
-  detectVideoInfo(videoInfo => {
-    moduleState.videoInfoCache = videoInfo;
-    sendVideoInfo();
-    console.log(videoInfo)
-  });
-
   waitForVideoElement().then(video => registerVideoElementEvents(video));
   browser.runtime.onMessage.addListener(processRuntimeMessage);
   const port = browser.runtime.connect(undefined, { name: "content-tab" });
   port.onMessage.addListener(processPortMessage);
   moduleState.backgroundServicePort = port;
   sendVideoInfo();
+
+  detectVideoInfo(videoInfo => {
+    moduleState.videoInfoCache = videoInfo;
+    sendVideoInfo();
+    console.group("Video Info:");
+    console.log(videoInfo)
+    console.groupEnd();
+  });
+
+  detectQueue((videos, currentIndex) => {
+    if (moduleState.backgroundServicePort === null) {
+      return;
+    }
+
+    try {
+      moduleState.backgroundServicePort.postMessage({
+        type: MessageTypes.QueueUpdate,
+        videoQueue: {
+          videos,
+          currentIndex,
+          list: new URLSearchParams(window.location.search).get("list")
+        }
+      } satisfies QueueUpdateMessage);
+    } catch (err) {
+      if (moduleState.isActiveTab) {
+        try {
+          const setActiveTabMessage: SetActiveTabMessage = {
+            type: MessageTypes.SetActiveTab,
+            tabId: null
+          };
+          moduleState.backgroundServicePort.postMessage(setActiveTabMessage);
+        } catch {
+          moduleState.isActiveTab = false;
+        }
+      }
+
+      console.error(err);
+    }
+
+    console.group("Queue:");
+    console.log({
+      videos,
+      currentIndex,
+      list: new URLSearchParams(window.location.search).get("list")
+    } satisfies VideoQueue);
+    console.groupEnd();
+  });
 
   (globalThis as any).contentModule = Object.freeze({
     moduleState,

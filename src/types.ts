@@ -117,6 +117,102 @@ export function detectPlaybackInfoUpdates(playbackInfo: PlaybackInfo | undefined
     .filter(key => !propertyEquals(playbackInfo, newPlaybackInfo, key)) as Array<keyof PlaybackInfo>;
 }
 
+export interface QueuedVideoInfo {
+  videoId: string,
+  title: string,
+  channel: string
+};
+
+export function isQueuedVideoInfo(object: any | null | undefined): object is QueuedVideoInfo {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (typeof object.videoId !== "string") {
+    return false;
+  }
+
+  if (object.videoId.length === 0) {
+    return false;
+  }
+
+  if (typeof object.title !== "string") {
+    return false;
+  }
+
+  if (object.title.length === 0) {
+    return false;
+  }
+
+  if (typeof object.channel !== "string") {
+    return false;
+  }
+
+  if (object.channel.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+export function detectQueuedVideoInfoUpdates(queuedVideoInfo: QueuedVideoInfo | undefined, newQueuedVideoInfo: QueuedVideoInfo): Array<keyof QueuedVideoInfo> {
+  if (queuedVideoInfo === undefined) {
+    return Object.keys(newQueuedVideoInfo) as Array<keyof QueuedVideoInfo>;
+  }
+
+  return Object.keys(newQueuedVideoInfo)
+    .filter(key => !propertyEquals(queuedVideoInfo, newQueuedVideoInfo, key)) as Array<keyof QueuedVideoInfo>;
+}
+
+export interface VideoQueue {
+  videos: Array<QueuedVideoInfo>,
+  currentIndex: number,
+  list: string | null
+};
+
+export function isVideoQueue(object: any | null | undefined): object is VideoInfo {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (!Array.isArray(object.videos)) {
+    return false;
+  }
+
+  for (const video of object.videos) {
+    if (!isQueuedVideoInfo(video)) {
+      return false;
+    }
+  }
+
+  if (typeof object.currentIndex !== "number") {
+    return false;
+  }
+
+  if (object.currentIndex < -1) {
+    return false;
+  }
+
+  if (object.list !== null) {
+    if (typeof object.list !== "string") {
+      return false;
+    }
+    if (object.list.length === 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export interface VideoInfo {
   videoId: string,
   title: string,
@@ -124,7 +220,7 @@ export interface VideoInfo {
   channelImageUrl: string,
   duration: number,
   isLive: boolean,
-  playbackInfo: PlaybackInfo
+  playbackInfo: PlaybackInfo,
 };
 
 export function isVideoInfo(object: any | null | undefined): object is VideoInfo {
@@ -202,6 +298,7 @@ export function detectVideoInfoUpdates(videoInfo: VideoInfo | null | undefined, 
 export interface UserHostingOptions {
   cohostsUUID: Array<string>,
   waitForBufferingFollowers: boolean
+  shareQueue: boolean
 };
 
 export function isUserHostingOptions(object: any | null | undefined): object is UserHostingOptions {
@@ -218,6 +315,10 @@ export function isUserHostingOptions(object: any | null | undefined): object is 
   }
 
   if (typeof object.waitForBufferingFollowers !== "boolean") {
+    return false;
+  }
+
+  if (typeof object.shareQueue !== "boolean") {
     return false;
   }
 
@@ -239,7 +340,8 @@ export function detectUserHostingOptionsUpdates(userHostingOptions: UserHostingO
 
 export const userHostingOptionsDefaults: Readonly<UserHostingOptions> = Object.freeze({
   cohostsUUID: [],
-  waitForBufferingFollowers: true
+  waitForBufferingFollowers: true,
+  shareQueue: true
 });
 
 export interface UserFollowingOptions {
@@ -290,7 +392,8 @@ export interface User {
   connectionQuality: ConnectionQuality | null,
   videoInfo: VideoInfo | null,
   followingUUID: string | null,
-  followerUUIDs: Array<string>
+  followerUUIDs: Array<string>,
+  videoQueue: VideoQueue | null
 };
 
 export function isUser(object: any | null | undefined): object is User {
@@ -352,6 +455,12 @@ export function isUser(object: any | null | undefined): object is User {
     return false;
   }
 
+  if (object.videoQueue !== null) {
+    if (!isVideoQueue(object.videoQueue)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -364,7 +473,8 @@ export const userDefaults: Readonly<User> = Object.freeze({
   connectionQuality: null,
   videoInfo: null,
   followingUUID: null,
-  followerUUIDs: []
+  followerUUIDs: [],
+  videoQueue: null
 });
 
 export function detectUserUpdates(user: User | undefined, newUser: User): Array<keyof User> {
@@ -551,7 +661,8 @@ export enum MessageTypes {
   KeepAlive = "keep-alive",
   Notify = "notify",
   NotificationDismissed = "notification-dismissed",
-  OpenNotifications = "open-notifications"
+  OpenNotifications = "open-notifications",
+  QueueUpdate = "queue-update"
 };
 
 export interface GenericMessage {
@@ -1107,6 +1218,33 @@ export function isOpenNotificationsMessage(object: any | null | undefined): obje
   return true;
 }
 
+export interface QueueUpdateMessage extends GenericMessage {
+  type: MessageTypes.QueueUpdate,
+  videoQueue: VideoQueue | null
+};
+
+export function isQueueUpdateMessage(object: any | null | undefined): object is QueueUpdateMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.QueueUpdate) {
+    return false;
+  }
+
+  if (object.videoQueue !== null) {
+    if (!isVideoQueue(object.videoQueue)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -1128,7 +1266,8 @@ export type Message = (
   RequestVideoInfoMessage |
   NotifyMessage |
   NotificationDismissedMessage |
-  OpenNotificationsMessage
+  OpenNotificationsMessage |
+  QueueUpdateMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

@@ -41,7 +41,8 @@ import {
   Notification,
   isNotifyMessage,
   isNotificationDismissedMessage,
-  OpenNotificationsMessage
+  OpenNotificationsMessage,
+  isQueueUpdateMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -236,8 +237,6 @@ function notifyServerOfSelf() {
   };
   serviceState.serverConnection.send(JSON.stringify(userMessage));
 }
-
-notifyServerOfSelf as unknown as void; // To be used after more implementation.
 
 function cleanupServerConnection() {
   if (serviceState.serverConnection === null) {
@@ -477,6 +476,24 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       );
       serviceState.user.videoInfo = videoInfoMessage.videoInfo;
       notifyServerOfVideoInfo();
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.QueueUpdate: {
+      const queueUpdateMessage = wellDefinedMessage(
+        isQueueUpdateMessage,
+        MessageTypes.QueueUpdate,
+        message
+      );
+
+      if (!serviceState.user.hostingOptions.shareQueue) {
+        serviceState.user.videoQueue = null;
+      } else {
+        serviceState.user.videoQueue = queueUpdateMessage.videoQueue;
+      }
+
+      notifyServerOfSelf();
       const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
       serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
@@ -989,7 +1006,8 @@ function main() {
     getAllTabs: () => browser.tabs.query({}),
     broadcastPackagedStateToRuntime,
     openNotifications,
-    clearNotifications
+    clearNotifications,
+    notifyServerOfSelf
   });
 }
 
