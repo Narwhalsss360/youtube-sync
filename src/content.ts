@@ -2,6 +2,9 @@ import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
 import {  arrayEquals, asType, detectQueuedVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, QueuedVideoInfo, QueueUpdateMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, VideoQueue, wellDefined, wellDefinedMessage } from "./types";
 
+const ytIcons: NodeListOf<HTMLLinkElement> = document.querySelectorAll("link[rel~='icon']");
+const ogYTIconRef: string = wellDefined(ytIcons[0], new Error("Expected at least one icon link.")).href;
+
 const moduleState: {
   isActiveTab: boolean,
   videoInfoCache: VideoInfo | null
@@ -595,12 +598,19 @@ function processPortMessage(
         moduleState.isActiveTab = false;
         waitForVideoElement().then(video => removeVideoElementEvents(video));
         console.log("Is no longer active YouTube Sync tab.");
+        for (const link of ytIcons) {
+          link.href = ogYTIconRef;
+        }
       } else {
         if (moduleState.isActiveTab) {
           throw new Error("Already set as active tab.");
         }
         moduleState.isActiveTab = true;
         console.log("Is active YouTube Sync tab.");
+        for (const link of ytIcons) {
+          link.href = browser.runtime.getURL("yt-sync-icon128.png");
+        }
+
         waitForVideoElement().then(video => registerVideoElementEvents(video));
         moduleState.backgroundServicePort?.postMessage({
           type: MessageTypes.QueueUpdate,
