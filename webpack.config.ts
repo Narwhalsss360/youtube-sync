@@ -6,6 +6,9 @@ const outputPath = "dist";
 
 const config: Configuration = {
   entry: {
+    accordions: [
+      path.resolve(__dirname, "src", "accordions.ts")
+    ],
     background: [
       path.resolve(__dirname, "src", "background.ts")
     ],

@@ -1,0 +1,11 @@
+.accordion-container {}
+
+.accordion-header {
+  cursor: pointer;
+}
+
+.accordion-content {}
+
+.accordion-collapsed-content {
+  display: none !important;
+}
