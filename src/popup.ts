@@ -283,9 +283,23 @@ function attachDataToUserContainer(div: HTMLDivElement, user: User): HTMLDivElem
   }
 
   if (user.videoInfo === null) {
-    div.innerHTML = String.raw
+    let innerHTML: string = String.raw
    `<div id="${userElementIdPrefix(user.uuid, "username")}" class="text-div username">${user.username}</div>
     <div id="${userElementIdPrefix(user.uuid, "no-current-video")}" class="text-div no-current-video">No current video</div>`;
+
+    if (user.uuid !== popupState.packagedServiceState.user.uuid) {
+      if (popupState.packagedServiceState.user.followingUUID === user.uuid) {
+        innerHTML += (
+          `<button id="${userElementIdPrefix(user.uuid, "toggle-follow-button")}" value="stop">Stop following</button>`
+        );
+      } else {
+        innerHTML += (
+          `<button id="${userElementIdPrefix(user.uuid, "toggle-follow-button")}" value="start">Follow</button>`
+        );
+      }
+    }
+
+    div.innerHTML = innerHTML;
     return div;
   }
 
@@ -351,7 +365,6 @@ function ensureEventsAreRegistered(div: HTMLDivElement, user: User): HTMLDivElem
     (element: HTMLElement) => element instanceof HTMLDetailsElement,
     div.querySelector(`#${userElementIdPrefix(user.uuid, "followed-by-details")}`)
   );
-
 
   if (followedByDetails && followedByDetails.getAttribute("event-registered") !== "true") {
     followedByDetails.setAttribute("event-registered", "true");
