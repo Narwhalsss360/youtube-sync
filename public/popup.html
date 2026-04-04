@@ -4,29 +4,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="accordions.css">
     <title>YouTube Sync</title>
   </head>
   <body>
     <script type="module" src="popup.js"></script>
     <div class="forms-container">
-      <button id="notifications-toggle" style="background-color: darkgray;">Notifications</button>
       <button id="active-tab-toggle" disabled value="set">Set as active tab</button>
-      <form id="connect-as-form" class="connect-as-form" hidden>
-        <hr>
-        <input id="username-input" placeholder="Username..." disabled>
-        <input id="server-address-input" placeholder="Server address..." disabled>
-        <button id="connect-button" type="submit" disabled>Connect</button>
-      </form>
-      <form id="disconnect-form" class="disconnect-form hidden" hidden>
-        <hr>
-        <input id="disconnect-server-address" disabled>
-        <button type="submit">Disconnect</button>
-      </form>
+      <div id="connection-accordion-container" class="accordion-container" accordion-group="configuration" accordion-kind="container">
+        <div id="connection-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
+          <div id="connection-accordion-header-text" class="text-div-dark">Connection</div>
+        </div>
+        <div id="connection-accordion-content" class="accordion-content"accordion-kind="content">
+          <form id="connect-as-form" class="connect-as-form" hidden>
+            <input id="username-input" placeholder="Username..." disabled>
+            <input id="server-address-input" placeholder="Server address..." disabled>
+            <button id="connect-button" type="submit" disabled>Connect</button>
+          </form>
+          <form id="disconnect-form" class="disconnect-form hidden" hidden>
+            <input id="disconnect-server-address" disabled>
+            <button type="submit">Disconnect</button>
+          </form>
+        </div>
+      </div>
     </div>
     <hr>
-    <div id="users" class="users">
-    </div>
-    <div id="notifications" class="hidden notifications" hidden="true">
+    <div class="forms-container">
+      <div id="notifications-accordion-container" class="accordion-container" accordion-group="main" accordion-kind="container">
+        <div id="notifications-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
+          <div id="notifications-accordion-header-text" class="text-div-dark">Notifications</div>
+          <button id="notifications-toggle" class="hidden" style="background-color: darkgray;" hidden>Notifications</button>
+        </div>
+        <div id="notifications" class="notifications accordion-content" accordion-kind="content">
+        </div>
+      </div>
+      <div id="users-accordion-container" class="accordion-container" accordion-group="main" accordion-kind="container">
+        <div id="users-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
+          <div id="users-accordion-header-text" class="text-div-dark">Users</div>
+        </div>
+        <div id="users" class="users accordion-content" accordion-kind="content">
+        </div>
+      </div>
     </div>
   </body>
 </html>

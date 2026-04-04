@@ -25,20 +25,14 @@ import {
   NotificationDismissedMessage,
   isOpenNotificationsMessage
 } from "./types";
+import "./accordions";
+import { accordionHeaderAndContent, requireContainerKind, findParent, isAccordionContainer, isExpanded, accordionExpand } from "./accordions";
 
 function constructBadDOMError(message: string, element: HTMLElement | null | undefined = undefined): Error {
   return element ?
     new Error(`Bad DOM Error (${element.tagName}#${element.id}): ${message}`) :
-    new Error("Bad DOM Error: ${message}");
+    new Error(`Bad DOM Error: ${message}`);
 }
-
-const notificationsToggle: HTMLButtonElement = wellDefined(
-    asType<HTMLButtonElement>(
-    (element: HTMLElement) => element instanceof HTMLButtonElement,
-    document.getElementById("notifications-toggle")
-  ),
-  constructBadDOMError("Bad notifications-toggle")
-);
 
 const activeTabToggle: HTMLButtonElement = wellDefined(
     asType<HTMLButtonElement>(
@@ -94,6 +88,56 @@ const disconnectServerAddress: HTMLInputElement = wellDefined(
     document.getElementById("disconnect-server-address")
   ),
   constructBadDOMError("Bad disconnect-server-address")
+);
+
+const connectionAccordionHeaderText: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("connection-accordion-header-text")
+  ),
+  constructBadDOMError("Bad connection accordion header text")
+);
+
+const connectionAccordionContainer: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("connection-accordion-container")
+  ),
+  constructBadDOMError("Bad connection accordion container")
+);
+
+
+const usersAccordionHeaderText: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("users-accordion-header-text")
+  ),
+  constructBadDOMError("Bad users accordion header text")
+);
+
+const usersAccordionContainer: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("users-accordion-container")
+  ),
+  constructBadDOMError("Bad users accordion containerxt")
+);
+
+
+const notificationsAccordionHeaderText: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("notifications-accordion-header-text")
+  ),
+  constructBadDOMError("Bad notifications accordion header text")
+);
+
+const notificationsAccordionContainer: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("notifications-accordion-container")
+  ),
+  constructBadDOMError("Bad notifications accordion containerxt")
 );
 
 const popupState : {
@@ -537,8 +581,10 @@ function applyState(newState: PackagedServiceState) {
         }
       }
     }
+    connectionAccordionHeaderText.innerText = newState.serverAddress;
   } else {
     popupState.usersDiv.replaceChildren();
+    connectionAccordionHeaderText.innerText = "Connection";
   }
 
   for (const newNotificationInfo of newState.notifications.toReversed()) {
@@ -620,8 +666,8 @@ function processRuntimeMessage(
     }
     case MessageTypes.OpenNotifications: {
       wellDefinedMessage(isOpenNotificationsMessage, MessageTypes.OpenNotifications, message);
-      if (popupState.notificationsDiv.hidden) {
-        notificationsToggle.click();
+      if (!isExpanded(notificationsAccordionContainer)) {
+        accordionExpand(notificationsAccordionContainer);
       }
       break;
     }
@@ -638,18 +684,6 @@ function processRuntimeMessage(
       console.groupEnd();
       return;
     }
-  }
-}
-
-function notificationsToggleActivated() {
-  if (popupState.notificationsDiv.hidden) {
-    setHidden(popupState.usersDiv, true);
-    setHidden(popupState.notificationsDiv, false);
-    notificationsToggle.style.backgroundColor = "";
-  } else {
-    setHidden(popupState.notificationsDiv, true);
-    setHidden(popupState.usersDiv, false);
-    notificationsToggle.style.backgroundColor = "darkgray";
   }
 }
 
@@ -718,15 +752,49 @@ function disconnectFormSubmitted(evt: SubmitEvent): void {
   browser.runtime.sendMessage(disconnectFromServerMessage);
 }
 
+function applyAccordionHeaderPrefixes(textDiv: HTMLDivElement, collapsedPrefix: string, expandedPrefix: string) {
+  const container: HTMLElement | null = findParent(textDiv, element => isAccordionContainer(element));
+  if (!(container instanceof HTMLDivElement)) {
+    throw new Error(`The function ${accordionHeaderAndContent.name} is to only be invoked from accordion header target trees with accordion container parent`);
+  }
+  requireContainerKind(container);
+
+  const update = () => {
+    if (isExpanded(container)) {
+      if (!textDiv.innerText.startsWith(expandedPrefix)) {
+        textDiv.innerText = textDiv.innerText.replace(collapsedPrefix, "")
+        textDiv.innerText = `${expandedPrefix}${textDiv.innerText}`;
+      }
+    } else {
+      if (!textDiv.innerText.startsWith(collapsedPrefix)) {
+        textDiv.innerText = textDiv.innerText.replace(expandedPrefix, "")
+        textDiv.innerText = `${collapsedPrefix}${textDiv.innerText}`;
+      }
+    }
+  }
+
+  container.addEventListener("accordionexpand", update);
+  container.addEventListener("accordioncollapse", update);
+  update();
+  new MutationObserver(update).observe(textDiv, { childList: true });
+}
+
 async function main() {
   applyState(wellDefinedMessage(
     isPackagedServiceStateMessage,
     MessageTypes.PackagedServiceState,
     await browser.runtime.sendMessage({ type: MessageTypes.RequestPackagedServiceState })
   ).packagedServiceState);
+  if (popupState.packagedServiceState.serverAddress === null) {
+    accordionExpand(connectionAccordionContainer);
+  }
 
   browser.runtime.onMessage.addListener(processRuntimeMessage);
-  notificationsToggle.addEventListener("click", notificationsToggleActivated);
+  const collapsedPrefix = "⏵";
+  const expandedPrefix = "⏷";
+  applyAccordionHeaderPrefixes(connectionAccordionHeaderText, collapsedPrefix, expandedPrefix);
+  applyAccordionHeaderPrefixes(usersAccordionHeaderText, collapsedPrefix, expandedPrefix);
+  applyAccordionHeaderPrefixes(notificationsAccordionHeaderText, collapsedPrefix, expandedPrefix);
   activeTabToggle.addEventListener("click", activeTabToggleActivated);
   connectAsForm.addEventListener("submit", connectAsFormSubmitted);
   disconnectForm.addEventListener("submit", disconnectFormSubmitted);
