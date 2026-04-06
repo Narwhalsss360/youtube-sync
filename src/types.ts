@@ -213,6 +213,40 @@ export function isVideoQueue(object: any | null | undefined): object is VideoInf
   return true;
 }
 
+export function detectVideoQueueUpdates(videoQueue: VideoQueue | undefined | null, newVideoQueue: VideoQueue | null): Array<keyof VideoQueue> {
+  if (videoQueue === undefined) {
+    if (newVideoQueue === null) {
+      return [];
+    }
+    return Object.keys(newVideoQueue) as Array<keyof VideoQueue>;
+  }
+
+  if (newVideoQueue === null && videoQueue === null) {
+    return [];
+  }
+
+  if (newVideoQueue === null) {
+    if (videoQueue === null) {
+      return [];
+    } else {
+      return Object.keys(videoQueue) as Array<keyof VideoQueue>;
+    }
+  } else if (videoQueue === null) {
+    if (newVideoQueue === null) {
+      return [];
+    } else {
+      return Object.keys(newVideoQueue) as Array<keyof VideoQueue>;
+    }
+  }
+
+  const comparers: ComparersDefinitions = {
+    videos: arrayEquals,
+  };
+
+  return Object.keys(newVideoQueue)
+    .filter(key => !propertyEquals(videoQueue, newVideoQueue, key, comparers[key])) as Array<keyof VideoQueue>;
+}
+
 export interface VideoInfo {
   videoId: string,
   title: string,
@@ -486,7 +520,8 @@ export function detectUserUpdates(user: User | undefined, newUser: User): Array<
     hostingOptions: (a: UserHostingOptions, b: UserHostingOptions) => detectUserHostingOptionsUpdates(a, b).length === 0,
     followingOptions: (a: UserFollowingOptions, b: UserFollowingOptions) => detectUserFollowingOptionsUpdates(a, b).length === 0,
     videoInfo: (a: VideoInfo, b: VideoInfo) => detectVideoInfoUpdates(a, b).length === 0,
-    followerUUIDs: arrayEquals
+    followerUUIDs: arrayEquals,
+    videoQueue: (a: VideoQueue, b: VideoQueue) => detectVideoQueueUpdates(a, b).length === 0,
   };
 
   return Object.keys(newUser)
