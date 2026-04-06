@@ -975,18 +975,15 @@ def update_following_info() -> None:
             user.followingUUID = None
 
 
-async def send_to(user: ServerConnection | User, message: Message, log_level: int) -> None:
+async def send_to(user: User, message: Message, log_level: int, log_message: str | None = None) -> None:
     if log_level != logging.NOTSET:
-        logger.log(log_level, f"$<- {message}")
+        logger.log(log_level, f"SEND({user.uuid} <- {message}){f", {log_message}" if log_message is not None else ""}")
 
-    if isinstance(user, User):
-        await user.connection.send(dumps(asdict(message)))
-        user.last_communication_time = time.time()
-    else:
-        await user.send(dumps(asdict(message)))
+    await user.connection.send(dumps(asdict(message)))
+    user.last_communication_time = time.time()
 
 
-async def broadcast(message: Message, except_for: User | None, log_level: int) -> None:
+async def broadcast(message: Message, except_for: User | None, log_level: int, log_message: str | None = None) -> None:
     broadcast_to: list[User] = list(filter(lambda u: u != except_for, connected_users_by_uuid.values()) if except_for is not None else connected_users_by_uuid.values())
     send_results = gather(*[
         send_to(user, message, logging.NOTSET)
@@ -994,7 +991,7 @@ async def broadcast(message: Message, except_for: User | None, log_level: int) -
     ])
 
     if log_level != logging.NOTSET:
-        logger.log(log_level, f"BROADCAST({len(broadcast_to)} user(s)) <- {message}")
+        logger.log(log_level, f"BROADCAST({len(broadcast_to)} user(s)) <- {message}){f", {log_message}" if log_message is not None else ""}")
 
     await send_results
     for user, result in zip(broadcast_to, send_results):
@@ -1052,7 +1049,7 @@ async def handle_non_clerical_message(this_user: User, message: ReceivableMessag
             return
         this_user.followingUUID = message.followingUUID
         update_following_info()
-        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO)
+        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO, f"{this_user.username} is following {following.username}")
         return
 
     if isinstance(message, StopFollowingMessage):
@@ -1061,7 +1058,7 @@ async def handle_non_clerical_message(this_user: User, message: ReceivableMessag
             return
         this_user.followingUUID = None
         update_following_info()
-        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO)
+        await broadcast(UsersMessage(list(connected_users_by_uuid.values())), None, logging.INFO, f"{this_user.username} is no longer following.")
         return
 
     logger.error(f"Dropped message from {this_user}: {message}")
@@ -1074,14 +1071,21 @@ async def connection_handler(connection: ServerConnection) -> None:
             try:
                 message: ReceivableMessage = parse_message(recv)
             except DataParseError as e:
-                await send_to(connection, ErrorMessage(e.message, "Server"), logging.ERROR)
                 if this_user is None:
+                    error_message: ErrorMessage = ErrorMessage(e.message, "Server")
+                    await connection.send(dumps(asdict(error_message)))
+                    logger.error(f"Bad data from {connection.remote_address}: {error_message}")
+                    await connection.close()
                     return
-                continue
+                else:
+                    await send_to(this_user, ErrorMessage(e.message, "Server"), logging.ERROR)
+                    continue
 
             if this_user is None:
                 if not isinstance(message, ServerHandshakeRequestMessage):
-                    await send_to(connection, ErrorMessage(f"First message must be '{ServerHandshakeRequestMessage.MESSAGE_TYPE_VALUE}'.", "Server"), logging.ERROR)
+                    error_message: ErrorMessage = ErrorMessage(f"First message must be '{ServerHandshakeRequestMessage.MESSAGE_TYPE_VALUE}'.", "Server")
+                    await connection.send(dumps(asdict(error_message)))
+                    logger.error(f"Did not get a handshake request from {connection.remote_address}: {error_message}")
                     await connection.close()
                     return
 
@@ -1407,13 +1411,14 @@ def details(user: UserSpec) -> CommandResult:
 
 
 @cli.cmd(help="Send a notification to a user.")
-async def notify(user: UserSpec, message: str) -> None:
+async def notify(user: UserSpec, message: str) -> CommandResult:
     await send_to(user, NotifyMessage(Notification(
         int(datetime.datetime.now().timestamp() * 1000),
         "Server Administrator",
         message,
         False
     )), logging.INFO)
+    return CommandResult([], [Output(OutputDirection.stdout, "Sent!")])
 
 
 @cli.cmd(help="Kick a user")
@@ -1423,7 +1428,7 @@ async def kick(user: UserSpec) -> None:
         "Server",
         "You are being kicked",
         False
-    )), logging.INFO)
+    )), logging.WARNING)
     await user.connection.close()
 
 
