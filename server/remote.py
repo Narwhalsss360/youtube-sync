@@ -16,7 +16,7 @@ from configuration import MESSAGE_DELIMITER, REMOTE_CLI_STEP_TIMEOUT, REMOTE_POR
 from remote_cli import recv_line
 
 
-async def main() -> int:
+async def remote_with(args: list[str]) -> int:
     loop: AbstractEventLoop = get_event_loop()
     with socket(AddressFamily.AF_INET, SocketKind.SOCK_STREAM, IPPROTO_TCP) as client:
         client.setblocking(False)
@@ -42,7 +42,7 @@ async def main() -> int:
             print(f":BAD RESPONSE, {e.__class__.__name__}: {e}", file=stderr)
             return 1
 
-        user_input: UserInput = UserInput(args=argv[1:])
+        user_input: UserInput = UserInput(args=args)
         client.send(dumps(asdict(user_input)).encode() + MESSAGE_DELIMITER)
 
         try:
@@ -77,5 +77,9 @@ async def main() -> int:
     return 0
 
 
+def main() -> None:
+    exit(run(remote_with(argv[1:])))
+
+
 if __name__ == "__main__":
-    exit(run(main()))
+    main()
