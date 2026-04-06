@@ -234,9 +234,15 @@ type _CLIKindFunctionGenericReturnType[T] = Callable[[CLIContext], Coroutine[Any
 type CLIKindFunction = _CLIKindFunctionGenericReturnType[int]
 
 
+async def none_cli(cli_context: CLIContext) -> int:
+    await cli_context.ytsync_server.ytsync_serve_task
+    return 0
+
+
 cli_kinds: dict[str, CLIKindFunction] = {
     "local": local_cli,
-    "remote": remote_cli
+    "remote": remote_cli,
+    "none": none_cli
 }
 
 
