@@ -32,6 +32,8 @@ import subprocess
 
 HEARTBEAT_INTERVAL: float = 0.1
 KEEP_ALIVE_INTERVAL: float = 20
+DEGRADED_CONNECTION_INTERVAL: float = 0.75
+BAD_CONNECTION_INTERVAL: float = 2
 DEFAULT_LOG_PATH: str = "server.log"
 REMOTE_PORT: int = 32013
 REMOTE_CLI_STEP_TIMEOUT: float = 8
@@ -430,7 +432,17 @@ class User:
     def __post_init__(self) -> None:
         self.connection: ServerConnection
         self.last_communication_time: float = time.time()
+        self.last_video_info_update: float | None = None
+        self.video_info_update_time_delta: float | None = None
         self.waiting_for_acknowledge: list[Message] = []
+
+    def apply_video_info_timing_updates(self, newVideoInfo: VideoInfo | None) -> None:
+        if newVideoInfo is None:
+            self.video_info_update_time_delta = None
+            self.last_video_info_update = None
+        else:
+            self.video_info_update_time_delta = time.time() - self.last_video_info_update if self.last_video_info_update else 0
+            self.last_video_info_update = time.time()
 
     @classmethod
     def from_data(cls: type[Self], data: dict[str, Any] | Self, require_uuid: bool = True) -> Self:
@@ -528,6 +540,7 @@ class User:
         if self.uuid != new_data.uuid:
             raise ValueError("Cannot update data, uuid mismatch")
 
+        self.apply_video_info_timing_updates(new_data.videoInfo)
         self.videoInfo = new_data.videoInfo
         self.followingUUID = new_data.followingUUID
         self.followerUUIDs = new_data.followerUUIDs
@@ -1017,14 +1030,15 @@ async def handle_disconnect(user: User) -> None:
 
     if user.followingUUID or user.followerUUIDs:
         update_following_info()
-        await broadcast(UsersMessage(users=list(connected_users_by_uuid.values())), None, logging.DEBUG)
+        await broadcast(UsersMessage(users=list(connected_users_by_uuid.values())), None, logging.DEBUG, f"User {user.uuid} disconnected")
     else:
-        await broadcast(UserDisconnectMessage(user.uuid), None, logging.DEBUG)
+        await broadcast(UserDisconnectMessage(user.uuid), None, logging.DEBUG, f"User {user.uuid} disconnected")
 
 
 async def handle_non_clerical_message(this_user: User, message: ReceivableMessage) -> None:
     if isinstance(message, VideoInfoMessage):
-        log_level: int = logging.DEBUG if getattr(this_user.videoInfo, "videoId", None) == getattr(message, "videoId", None) else logging.INFO
+        log_level: int = logging.DEBUG if getattr(this_user.videoInfo, "videoId", None) == getattr(message.videoInfo, "videoId", None) else logging.INFO
+        this_user.apply_video_info_timing_updates(message.videoInfo)
         this_user.videoInfo = message.videoInfo
         await broadcast(message, this_user, log_level)
         return
@@ -1105,8 +1119,9 @@ async def connection_handler(connection: ServerConnection) -> None:
                 if this_user.waiting_for_acknowledge:
                     this_user.waiting_for_acknowledge.pop()
                     if this_user.uuid not in connected_users_by_uuid:
+                        this_user.apply_video_info_timing_updates(this_user.videoInfo)
                         connected_users_by_uuid[this_user.uuid] = this_user
-                        await broadcast(UserMessage(user=this_user), this_user, logging.DEBUG)
+                        await broadcast(UserMessage(user=this_user), this_user, logging.DEBUG, "Providing users to new user")
                     continue
                 else:
                     await send_to(this_user, ErrorMessage("Was not expecting acknowledge message. Disconnecting...", "Server"), logging.ERROR)
@@ -1132,14 +1147,70 @@ async def connection_handler(connection: ServerConnection) -> None:
             await handle_disconnect(this_user)
 
 
+def update_connection_quality(user: User) -> list[Task]:
+    if user.videoInfo is None:
+        if user.connectionQuality is None:
+            return []
+        user.connectionQuality = None
+        user_message: UserMessage = UserMessage(user)
+        user.waiting_for_acknowledge.append(user_message)
+        return [create_task(broadcast(user_message, None, logging.WARNING))]
+    assert user.last_video_info_update is not None and user.video_info_update_time_delta is not None, "expected to not be None if videoInfo is not None"
+
+    if user.videoInfo.playbackInfo.state != PlaybackState.Playing:
+        return []
+
+    new_connection_quality: ConnectionQuality
+    time_delta: float = time.time() - user.last_video_info_update
+    if user.connectionQuality == ConnectionQuality.Good:
+        if time_delta > BAD_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Bad
+        elif time_delta > DEGRADED_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Degraded
+        else:
+            return []
+    elif user.connectionQuality == ConnectionQuality.Degraded:
+        if time_delta > BAD_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Bad
+        elif time_delta < DEGRADED_CONNECTION_INTERVAL and user.video_info_update_time_delta < DEGRADED_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Good
+        else:
+            return []
+    elif user.connectionQuality == ConnectionQuality.Bad:
+        if time_delta < DEGRADED_CONNECTION_INTERVAL and user.video_info_update_time_delta < DEGRADED_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Good
+        elif time_delta < BAD_CONNECTION_INTERVAL and user.video_info_update_time_delta < BAD_CONNECTION_INTERVAL:
+            new_connection_quality = ConnectionQuality.Degraded
+        else:
+            return []
+    elif user.connectionQuality is None:
+        new_connection_quality = ConnectionQuality.Good
+    else:
+        assert False, "Unreachable, matched all connection qualities"
+
+    if new_connection_quality == user.connectionQuality:
+        return []
+
+    user.connectionQuality = new_connection_quality
+    user_message: UserMessage = UserMessage(user)
+    user.waiting_for_acknowledge.append(user_message)
+    return [create_task(broadcast(user_message, None, logging.WARNING))]
+
+
+def keep_connection_alive(user: User) -> list[Task]:
+    if time.time() - user.last_communication_time < KEEP_ALIVE_INTERVAL:
+        return []
+    return [create_task(send_to(user, KeepAliveMessage(), logging.DEBUG))]
+
+
 def heartbeat(server: Server) -> None:
     if not server.is_serving():
         return
 
     tasks: list[Task[None]] = []
     for user in connected_users_by_uuid.values():
-        if time.time() - user.last_communication_time >= KEEP_ALIVE_INTERVAL:
-            tasks.append(create_task(send_to(user, KeepAliveMessage(), logging.DEBUG)))
+        tasks.extend(update_connection_quality(user))
+        tasks.extend(keep_connection_alive(user))
 
     def tasks_done(_: Future[list[None]]) -> None:
         delay_task: Task[None] = create_task(asyncio.sleep(HEARTBEAT_INTERVAL))

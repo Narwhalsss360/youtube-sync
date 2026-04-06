@@ -13,6 +13,7 @@ const moduleState: {
   maxDeviation: number,
   cachedCurrentIndex: number | null,
   cachedQueuedVideos: Array<QueuedVideoInfo> | null
+  throttleAt: number | null
 } = {
   isActiveTab: false,
   videoInfoCache: null,
@@ -20,7 +21,8 @@ const moduleState: {
   packagedServiceState: null,
   maxDeviation: 1,
   cachedCurrentIndex: null,
-  cachedQueuedVideos: null
+  cachedQueuedVideos: null,
+  throttleAt: null
 };
 
 function findParent(elementNode: HTMLElement, predicate: (element: HTMLElement) => boolean): HTMLElement | null {
@@ -292,9 +294,15 @@ async function detectQueue(onQueueChanged: (videos: Array<QueuedVideoInfo>, curr
 }
 
 let ensureVideoInfoIsSentIntervalId: ReturnType<typeof setInterval> | null = null;
+let lastSend: number = 0;
 const ENSURE_VIDEO_INFO_SENT_INTERVAL: number = 10;
 
 function sendVideoInfo() {
+  if (moduleState.throttleAt !== null && Date.now() - lastSend < moduleState.throttleAt) {
+    return;
+  }
+  lastSend = Date.now();
+
   if (!moduleState.isActiveTab || moduleState.backgroundServicePort === null) {
     if (ensureVideoInfoIsSentIntervalId === null) {
       ensureVideoInfoIsSentIntervalId = setInterval(() => {
