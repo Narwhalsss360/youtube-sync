@@ -30,6 +30,7 @@ import time
 import subprocess
 
 
+INITIAL_HEARTBEAT_DELAY: float = 3
 HEARTBEAT_INTERVAL: float = 0.1
 KEEP_ALIVE_INTERVAL: float = 20
 DEGRADED_CONNECTION_INTERVAL: float = 0.75
@@ -1203,20 +1204,16 @@ def keep_connection_alive(user: User) -> list[Task]:
     return [create_task(send_to(user, KeepAliveMessage(), logging.DEBUG))]
 
 
-def heartbeat(server: Server) -> None:
-    if not server.is_serving():
-        return
+async def heartbeat(server: Server) -> None:
+    await asyncio.sleep(INITIAL_HEARTBEAT_DELAY)
+    while server.is_serving():
+        tasks: list[Task[None]] = []
+        for user in connected_users_by_uuid.values():
+            tasks.extend(update_connection_quality(user))
+            tasks.extend(keep_connection_alive(user))
 
-    tasks: list[Task[None]] = []
-    for user in connected_users_by_uuid.values():
-        tasks.extend(update_connection_quality(user))
-        tasks.extend(keep_connection_alive(user))
-
-    def tasks_done(_: Future[list[None]]) -> None:
-        delay_task: Task[None] = create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
-        server.closed_waiter.add_done_callback(lambda _: delay_task.cancel())
-        delay_task.add_done_callback(lambda _: heartbeat(server))
-    gather(*tasks).add_done_callback(tasks_done)
+        await gather(*tasks)
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
 
 
 class LevelNames(int, Enum):
@@ -1739,15 +1736,12 @@ async def main(
         serve_task: Task[None] = create_task(server.serve_forever())
         cli.env["server"] = server
 
-        initial_heartbeat_delay: Task[None] = create_task(asyncio.sleep(3))
-        server.closed_waiter.add_done_callback(lambda _: initial_heartbeat_delay.cancel())
-        initial_heartbeat_delay.add_done_callback(lambda _: heartbeat(server))
+        heartbeat_task: Task[None] = create_task(heartbeat(server))
+        cli_task: Task[None] = create_task(remote_cli(server) if remote else local_cli(server))
+        server.closed_waiter.add_done_callback(lambda _: heartbeat_task.cancel())
 
         try:
-            if remote:
-                await remote_cli(server)
-            else:
-                await local_cli(server)
+            await gather(heartbeat_task, cli_task)
         except (CancelledError, KeyboardInterrupt):
             if server.is_serving():
                 server.close()
