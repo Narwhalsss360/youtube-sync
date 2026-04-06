@@ -1,0 +1,133 @@
+server listening on [::1]:8823
+server listening on 127.0.0.1:8823
+server closing
+server closed
+unhandled exception during asyncio.run() shutdown
+task: <Task finished name='Task-8' coro=<input_async() done, defined at C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py:102> exception=PermissionError(13, 'Access is denied', None, 5, None)>
+Traceback (most recent call last):
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1948, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 445, in select
+    self._poll(timeout)
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 775, in _poll
+    if status is None:
+       ^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 90, in trace_dispatch
+    return self.dispatch_line(frame)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 115, in dispatch_line
+    if self.quitting: raise BdbQuit
+                      ^^^^^^^^^^^^^
+bdb.BdbQuit
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 635, in ytsync_cli_serve
+    _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 432, in local_cli
+    user_input: str = await user_input_task
+                      ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 115, in input_async
+    kill(proc.pid, SIGINT)
+PermissionError: [WinError 5] Access is denied
+unhandled exception during asyncio.run() shutdown
+task: <Task finished name='Task-7' coro=<local_cli() done, defined at C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py:427> exception=PermissionError(13, 'Access is denied', None, 5, None)>
+Traceback (most recent call last):
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1948, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 445, in select
+    self._poll(timeout)
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 775, in _poll
+    if status is None:
+       ^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 90, in trace_dispatch
+    return self.dispatch_line(frame)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 115, in dispatch_line
+    if self.quitting: raise BdbQuit
+                      ^^^^^^^^^^^^^
+bdb.BdbQuit
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 635, in ytsync_cli_serve
+    _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 432, in local_cli
+    user_input: str = await user_input_task
+                      ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 115, in input_async
+    kill(proc.pid, SIGINT)
+PermissionError: [WinError 5] Access is denied
+unhandled exception during asyncio.run() shutdown
+task: <Task finished name='Task-1' coro=<ytsync_cli_serve() done, defined at C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py:609> exception=PermissionError(13, 'Access is denied', None, 5, None)>
+Traceback (most recent call last):
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1948, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 445, in select
+    self._poll(timeout)
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 775, in _poll
+    if status is None:
+       ^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 90, in trace_dispatch
+    return self.dispatch_line(frame)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\AppData\Local\Programs\Python\Python312\Lib\bdb.py", line 115, in dispatch_line
+    if self.quitting: raise BdbQuit
+                      ^^^^^^^^^^^^^
+bdb.BdbQuit
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 635, in ytsync_cli_serve
+    _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 432, in local_cli
+    user_input: str = await user_input_task
+                      ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\frank\src\repos\Narwhalsss360\youtube-sync\server\ytsync_cli.py", line 115, in input_async
+    kill(proc.pid, SIGINT)
+PermissionError: [WinError 5] Access is denied

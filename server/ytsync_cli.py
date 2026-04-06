@@ -29,18 +29,13 @@ from shlex import split
 from signal import SIGINT
 from socket import IPPROTO_TCP, AddressFamily, SocketKind, socket
 from sys import argv, stderr, stdout
-from typing import Annotated, Any, Callable, Literal, Optional, TextIO
+from typing import Annotated, Any, Callable, Coroutine, Literal, Optional, TextIO
 
 import npycli  # pyright: ignore[reportMissingTypeStubs]
-from configuration import (
-    DEFAULT_LOG_PATH,
-    MESSAGE_DELIMITER,
-    REMOTE_CLI_STEP_TIMEOUT,
-    REMOTE_PORT,
-)
-from core import connected_users_by_uuid, send_to, ytsync
+
 from npycli import (  # pyright: ignore[reportMissingTypeStubs]
     CLI,
+    Alias,
     CLIError,
     Command,
     DefaultPreview,
@@ -73,6 +68,13 @@ from npycli.parsing import (  # pyright: ignore[reportMissingTypeStubs]
     create_literal_parser,
 )
 from websockets.asyncio.server import Server
+from configuration import (
+    DEFAULT_LOG_PATH,
+    MESSAGE_DELIMITER,
+    REMOTE_CLI_STEP_TIMEOUT,
+    REMOTE_PORT,
+)
+from core import connected_users_by_uuid, send_to, ytsync, YouTubeSyncServer
 from ytsync_types import Notification, NotifyMessage, User
 
 logger = logging.getLogger()
@@ -205,6 +207,18 @@ def format_exc(e: BaseException, tabstr: str = "  ", inner_exc_tabs: int = 1) ->
 cli_handler: CommandLineInterfaceHandler = CommandLineInterfaceHandler()
 file_handler: Optional[logging.FileHandler] = None
 ytsync_cli: CLI = CLI("server")
+
+
+@ytsync_cli.retvals()
+def retvals(command: Command, return_value: Optional[Any]) -> Optional[Any]:
+    return command, return_value
+
+
+def cli_retval_return_value(retval_unsafe: Any) -> tuple[Command, Any]:
+    assert isinstance(retval_unsafe, tuple)
+    assert len(retval_unsafe) == 2
+    assert isinstance(retval_unsafe[0], Command)
+    return retval_unsafe
 
 
 @dataclass
@@ -411,10 +425,10 @@ def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] =
 ytsync_cli.parsers[LevelNames] = create_enum_parser(LevelNames)
 
 
-async def local_cli(server: Server) -> None:
-    while server.is_serving():
+async def local_cli(ytsync_server: YouTubeSyncServer) -> int:
+    while ytsync_server.websocket_server.is_serving():
         user_input_task: Task[str] = create_task(input_async(ytsync_cli.prompt_entry_marker))
-        server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
+        ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
         try:
             user_input: str = await user_input_task
         except EOFError:
@@ -429,7 +443,7 @@ async def local_cli(server: Server) -> None:
 
         try:
             cli_handler.command_result_logging = True
-            retval: Any = ytsync_cli.exec(entries)
+            retval = cli_retval_return_value(ytsync_cli.exec(entries))[1]
         except EmptyEntriesError:
             cli_handler.command_result_logging = False
             continue
@@ -451,6 +465,8 @@ async def local_cli(server: Server) -> None:
             for output in retval.outputs:
                 print(output.output, end=output.end, file=stdout if output.direction == OutputDirection.stdout else stderr)
 
+    return 0
+
 
 async def recv_line(sock: socket) -> bytearray:
     received: bytearray = bytearray()
@@ -468,10 +484,7 @@ async def recv_line(sock: socket) -> bytearray:
     return received
 
 
-async def remote_cli(server: Server) -> None:
-    @ytsync_cli.retvals()
-    def retvals(command: Command, return_value: Optional[Any]) -> Optional[Any]:
-        return command, return_value
+async def remote_cli(ytsync_server: YouTubeSyncServer) -> int:
 
     def log_prefix(s: Any) -> str:
         return f"[{remote_cli.__name__}] {s}"
@@ -483,9 +496,9 @@ async def remote_cli(server: Server) -> None:
         listener.bind(("127.0.0.1", REMOTE_PORT))
         listener.listen(1)
 
-        while server.is_serving():
+        while ytsync_server.websocket_server.is_serving():
             accept_task = create_task(loop.sock_accept(listener))
-            server.closed_waiter.add_done_callback(lambda _: accept_task.cancel())
+            ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: accept_task.cancel())
             client, client_addr = await accept_task
             logger.info(f"{client_addr} connected.")
 
@@ -530,15 +543,10 @@ async def remote_cli(server: Server) -> None:
 
             return_value: Any = None
             try:
-                retval_unsafe: Any = ytsync_cli.exec(user_input.args)
-                assert isinstance(retval_unsafe, tuple)
-                assert len(retval_unsafe) == 2
-                assert isinstance(retval_unsafe[0], Command)
-                command: Command = retval_unsafe[0]
-                return_value = retval_unsafe[1]
+                command, return_value = cli_retval_return_value(ytsync_cli.exec(user_input.args))
                 if iscoroutine(return_value):
                     task: Task[Any] = create_task(return_value)
-                    server.closed_waiter.add_done_callback(lambda _: task.cancel())
+                    ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: task.cancel())
                     return_value = await task
                 outputs: list[Output]
                 if isinstance(return_value, CommandResult):
@@ -573,13 +581,50 @@ async def remote_cli(server: Server) -> None:
             finally:
                 client.close()
 
+    return 0
 
-async def main(
+# This is done so that npycli sees a generic alias, and stops there at building the parameter, that is, to obfuscate.
+type _CLIKindFunctionGenericReturnType[T] = Callable[[YouTubeSyncServer], Coroutine[Any, Any, T]]
+type CLIKindFunction = _CLIKindFunctionGenericReturnType[int]
+
+
+cli_kinds: dict[str, CLIKindFunction] = {
+    "local": local_cli,
+    "remote": remote_cli
+}
+
+
+type CLIKind = CLIKindFunction
+
+
+def cli_kind_parser(s: str) -> CLIKind:
+    if (cli_kind := cli_kinds.get(s, None)) is not None:
+        return cli_kind
+    raise ParsingError(s, f"{s} is not a cli kind. Valid are {", ".join([kind for kind in cli_kinds.keys()])}")
+
+
+ytsync_cli.parsers[CLIKind] = cli_kind_parser
+
+
+async def ytsync_cli_serve(
     host: str,
     port: int,
-    log_level: LevelNames = LevelNames.notset,
-    log_file: Annotated[Optional[Path], DefaultPreview(DEFAULT_LOG_PATH)] = None,
-    remote: Annotated[bool, Description("Run server in remote mode")] = False
+    log_level: Annotated[
+        LevelNames,
+        Alias("log-level", private=True),
+        Description(f"Log levels: {", ".join([level.name for level in LevelNames])}")
+    ] = LevelNames.notset,
+    log_file: Annotated[
+        Optional[Path],
+        Alias("log-file", private=True),
+        DefaultPreview(DEFAULT_LOG_PATH)
+    ] = None,
+    cli_kind: Annotated[
+        CLIKind,
+        Alias("cli-kind", private=True),
+        Description(f"CLI kind, some of which are {", ".join([kind for kind in cli_kinds.keys()])}."),
+        DefaultPreview("local")
+    ] = local_cli
 ) -> int:
     log_level = LevelNames.debug if log_level == LevelNames.notset else log_level
     log_file = log_file or Path(__file__).parent.joinpath(Path(DEFAULT_LOG_PATH))
@@ -597,22 +642,31 @@ async def main(
 
     async with ytsync(host, port, logger) as ytsync_server:
         ytsync_cli.env["server"] = ytsync_server.websocket_server
-        cli_task: Task[None] = create_task(remote_cli(ytsync_server.websocket_server) if remote else local_cli(ytsync_server.websocket_server))
+        cli_task: Task[int] = create_task(cli_kind(ytsync_server))
 
         try:
-            await gather(ytsync_server.ytsync_serve_task, cli_task)
+            _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
+            return cli_result
         except (CancelledError, KeyboardInterrupt):
-            return 0
-
-    return 0
+            return 1
 
 
-cmd: Command = Command.create(main, name="server", help="Serve the YouTube Sync server. Specify a host and port, logging level and log file.")  # type: ignore
-if __name__ == "__main__":
+ytsync_cli_serve_cmd: Command = Command.create(
+    ytsync_cli_serve,
+    name="ytsync-server-cli",
+    help="Serve the YouTube Sync server. Specify a host and port, logging level, log file and CLI kind.",
+)
+
+
+def main() -> None:
     try:
         if len(argv) == 1:
-            print(cmd.extended_command_help())
+            print(ytsync_cli_serve_cmd.extended_command_help())
         else:
-            exit(run(cmd(argv[1:], ytsync_cli.parsers)))
+            exit(run(ytsync_cli_serve_cmd(argv[1:], ytsync_cli.parsers)))
     except KeyboardInterrupt:
         print("\n^C")
+
+
+if __name__ == "__main__":
+    main()

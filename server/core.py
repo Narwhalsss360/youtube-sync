@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from asyncio import CancelledError, Future, Task, create_task, gather
+from asyncio import Future, Task, create_task, gather
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from json import dumps
-from logging import Logger
 from typing import AsyncIterator, cast
 from uuid import uuid4
 
@@ -18,7 +17,7 @@ from configuration import (
     INITIAL_HEARTBEAT_DELAY,
     KEEP_ALIVE_INTERVAL,
 )
-from websockets import ConnectionClosed, ConnectionClosedOK
+from websockets import ConnectionClosed, ConnectionClosedOK, LoggerLike
 from websockets.asyncio.server import Server, ServerConnection, serve
 from ytsync_types import (
     AcknowledgeMessage,
@@ -375,21 +374,22 @@ class YouTubeSyncServer:
 async def ytsync(
     host: str,
     port: int,
-    logger: Logger,
+    logger: LoggerLike | None = None,
 ) -> AsyncIterator[YouTubeSyncServer]:
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
         heartbeat_task: Task[None] = create_task(heartbeat(server))
         server.closed_waiter.add_done_callback(lambda _: heartbeat_task.cancel())
+        ytsync_server: YouTubeSyncServer = YouTubeSyncServer(
+            server,
+            cast(Future[None], gather(serve_task, heartbeat_task))
+        )
+
         try:
-            yield YouTubeSyncServer(
-                server,
-                cast(Future[None], gather(serve_task, heartbeat_task))
-            )
-        except (CancelledError, KeyboardInterrupt):
+            yield ytsync_server
+        finally:
             if server.is_serving():
                 server.close()
             if not serve_task.done():
                 await serve_task
-            raise
 
