@@ -246,13 +246,13 @@ class VideoQueue:
             False
         ))
 
-        parsed.list = well_defined(ensure_constructed_rethrow_type_or_value_error(
+        parsed.list = ensure_constructed_rethrow_type_or_value_error(
             cls,
             str,
             "list",
             parsed.list,
-            False
-        ))
+            True
+        )
 
         return parsed
 
