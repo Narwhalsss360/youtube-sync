@@ -310,14 +310,18 @@ ytsync_cli_serve_cmd: Command = Command.create(
 )
 
 
-def main() -> None:
+def serve_with(args: list[str]) -> None:
     try:
-        if len(argv) == 1:
+        if len(args) == 0:
             print(ytsync_cli_serve_cmd.extended_command_help())
         else:
-            exit(run(ytsync_cli_serve_cmd(argv[1:], ytsync_cli.parsers)))
+            exit(run(ytsync_cli_serve_cmd(args, ytsync_cli.parsers)))
     except KeyboardInterrupt:
         print("\n^C")
+
+
+def main() -> None:
+    serve_with(argv[1:])
 
 
 if __name__ == "__main__":
