@@ -1,64 +1,45 @@
 from __future__ import annotations
 
-import asyncio
 import datetime
 import logging
 import subprocess
 from asyncio import (
-    AbstractEventLoop,
     CancelledError,
     Task,
     create_task,
     gather,
-    get_event_loop,
-    iscoroutine,
     run,
     to_thread,
-    wait_for,
 )
-from dataclasses import Field, asdict, dataclass, field, fields, is_dataclass
-from enum import Enum
-from functools import partial
-from io import StringIO
-from json import dumps, loads
-from logging import Handler, LogRecord
-from multiprocessing import Process, Queue
-from os import get_terminal_size, kill
+from dataclasses import Field, fields, is_dataclass
+from logging import Handler
 from pathlib import Path
-from shlex import split
-from signal import SIGINT
-from socket import IPPROTO_TCP, AddressFamily, SocketKind, socket
-from sys import argv, stderr, stdout
-from typing import Annotated, Any, Callable, Coroutine, Literal, Optional, TextIO
+from sys import argv
+from typing import Annotated, Any, Callable, Coroutine, Literal, Optional
 
 import npycli  # pyright: ignore[reportMissingTypeStubs]
-
+from cli_core import (
+    CLIContext,
+    CommandLineInterfaceHandler,
+    CommandResult,
+    LevelNames,
+    Output,
+    OutputDirection,
+    UserError,
+)
+from configuration import (
+    DEFAULT_LOG_PATH,
+)
+from core import connected_users_by_uuid, send_to, ytsync
+from local_cli import local_cli
 from npycli import (  # pyright: ignore[reportMissingTypeStubs]
     CLI,
     Alias,
-    CLIError,
     Command,
     DefaultPreview,
     Description,
-    EmptyEntriesError,
     ParsingError,
 )
-from npycli.ansi import (  # pyright: ignore[reportMissingTypeStubs]
-    BACKGROUND_BLUE,
-    BACKGROUND_RED,
-    BACKGROUND_YELLOW,
-    CURSOR_DOWN,
-    CURSOR_UP,
-    INSERT_NEW_LINE,
-    RESTORE_SAVED_CURSOR_POSITION,
-    SAVE_CURRENT_CURSOR_POSITION,
-    SCR_RESET,
-    SELECT_CHARACTER_RENDITION,
-    SET_BOLD_MODE,
-    send_ansi,
-    strip_ansi,
-)
-from npycli.errors import causes
 from npycli.parameters import (  # pyright: ignore[reportMissingTypeStubs]
     BypassParse,
     CommandParameter,
@@ -67,141 +48,12 @@ from npycli.parsing import (  # pyright: ignore[reportMissingTypeStubs]
     create_enum_parser,
     create_literal_parser,
 )
+from remote_cli import remote_cli
 from websockets.asyncio.server import Server
-from configuration import (
-    DEFAULT_LOG_PATH,
-    MESSAGE_DELIMITER,
-    REMOTE_CLI_STEP_TIMEOUT,
-    REMOTE_PORT,
-)
-from core import connected_users_by_uuid, send_to, ytsync, YouTubeSyncServer
 from ytsync_types import Notification, NotifyMessage, User
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
-
-
-class LevelNames(int, Enum):
-    critical = 50
-    fatal = 50
-    error = 40
-    warning = 30
-    warn = 30
-    info = 20
-    debug = 10
-    notset = 0
-
-
-def input_async_process_target(queue: Queue[str]) -> None:
-    with open(0, "r") as stdin:
-        try:
-            queue.put(stdin.readline().rsplit("\n", 1)[0])
-        except KeyboardInterrupt:
-            return
-
-
-async def input_async(prompt: object = None) -> str:
-    user_input_queue: Queue[str] = Queue(1)
-
-    proc: Process = Process(target=input_async_process_target, args=(user_input_queue,), name="server:input", daemon=True)
-    print(prompt, end="", flush=True)
-    proc.start()
-    assert proc.pid is not None
-
-    try:
-        join_task: Task[None] = create_task(to_thread(proc.join))
-        while user_input_queue.empty() and not join_task.done():
-            await asyncio.sleep(0.02)
-    except CancelledError:
-        kill(proc.pid, SIGINT)
-        raise
-
-    if user_input_queue.empty():
-        raise EOFError
-
-    return user_input_queue.get()
-
-
-def print_above(*args: Any, max_columns: int, sep: str | None = " ", file: TextIO = stdout, current_is_empty: bool = False, lines_above: int = 1) -> None:
-    if lines_above == 0:
-        print(*args, sep=sep)
-        return
-
-    # Use print with file=buffer so this function can be used just like regular print
-    buffer: StringIO = StringIO()
-    print(*args, sep=sep, end="", file=buffer, flush=True)
-    output: str = buffer.getvalue()
-
-    line_count: int = 1
-    line_length: int = 0
-    for c in strip_ansi(output):
-        line_length += 1
-        if line_length == max_columns or c == "\n":
-            line_count += 1
-            line_length = 0
-
-    send_ansi(SAVE_CURRENT_CURSOR_POSITION, flush=True)
-    if current_is_empty:
-        print("\n" * lines_above, file=file, end="", flush=True)
-        send_ansi(CURSOR_UP.with_args(lines_above), file=file, flush=True)
-
-    # These ansi control commands may be supplied with arguments
-    print("\n" * line_count, file=file, end="", flush=True)
-    send_ansi(CURSOR_UP.with_args(line_count + lines_above - (0 if current_is_empty else 1)), file=file, flush=True)
-    # This one doesn't have argument, so we just repeat the command
-    send_ansi(INSERT_NEW_LINE, repeat=line_count, file=file, flush=True)
-
-    # Flush, just in case current cursor position gets moved after output
-    print(output, end='', file=file, flush=True)
-    send_ansi(RESTORE_SAVED_CURSOR_POSITION, file=file, flush=True)
-    send_ansi(CURSOR_DOWN.with_args(line_count), file=file, flush=True)
-
-
-def emit_record_fmt(ansi: bool, record: LogRecord) -> str:
-    scr: str
-    scr_reset: str = str(SELECT_CHARACTER_RENDITION.with_args(SCR_RESET)) if ansi else ""
-    if record.levelno <= LevelNames.info:
-        scr = str(SELECT_CHARACTER_RENDITION.with_args(BACKGROUND_BLUE)) if ansi else ""
-    elif record.levelno <= LevelNames.warning:
-        scr = str(SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_YELLOW)) if ansi else ""
-    else:
-        scr = str(SELECT_CHARACTER_RENDITION.with_args(SET_BOLD_MODE, BACKGROUND_RED)) if ansi else ""
-
-    msg = (
-        f"{scr}{datetime.datetime.now().isoformat()} {record.levelname}:{scr_reset} "
-        f"{record.getMessage()}"
-    )
-
-    return msg
-
-
-class CommandLineInterfaceHandler(Handler):
-    def __init__(self) -> None:
-        super().__init__(logging.NOTSET)
-        self.command_result_logging: bool = False
-
-    def emit(self, record: LogRecord) -> None:
-        try:
-            file: TextIO
-            if record.levelno <= LevelNames.info:
-                file = stdout
-            elif record.levelno <= LevelNames.warning:
-                file = stdout
-            else:
-                file = stderr
-
-            msg: str = emit_record_fmt(file.isatty(), record)
-            printer = print if self.command_result_logging else partial(print_above, max_columns=get_terminal_size().columns)
-            printer(msg, file=file)
-        except Exception:
-            self.handleError(record)
-
-
-def format_exc(e: BaseException, tabstr: str = "  ", inner_exc_tabs: int = 1) -> str:
-    return (
-        f"{e.__class__.__name__}: {f"\n{tabstr * inner_exc_tabs}".join(str(arg) for arg in e.args)}"
-        f"{format_exc(e.__cause__, tabstr, inner_exc_tabs + 1) if e.__cause__ else ""}"
-    )
 
 
 cli_handler: CommandLineInterfaceHandler = CommandLineInterfaceHandler()
@@ -212,54 +64,6 @@ ytsync_cli: CLI = CLI("server")
 @ytsync_cli.retvals()
 def retvals(command: Command, return_value: Optional[Any]) -> Optional[Any]:
     return command, return_value
-
-
-def cli_retval_return_value(retval_unsafe: Any) -> tuple[Command, Any]:
-    assert isinstance(retval_unsafe, tuple)
-    assert len(retval_unsafe) == 2
-    assert isinstance(retval_unsafe[0], Command)
-    return retval_unsafe
-
-
-@dataclass
-class RemoteInitialization:
-    stdout_isatty: bool
-    stderr_isatty: bool
-
-
-@dataclass
-class UserInputRequest:
-    prompt: str
-
-
-@dataclass
-class UserInput:
-    args: list[str]
-
-
-class OutputDirection(str, Enum):
-    stdout = "stdout"
-    stderr = "stderr"
-
-
-@dataclass
-class Output:
-    direction: OutputDirection
-    output: str
-    end: str = field(default="\n")
-
-
-@dataclass
-class CommandResult:
-    logs: list[LogRecord] = field(default_factory=lambda: [])
-    outputs: list[Output] = field(default_factory=lambda: [])
-
-
-class UserError(Exception):
-    def __init__(self, command: Command, message: str) -> None:
-        super().__init__(message, command)
-        self.command: Command = command
-        self.message: str = message
 
 
 def _get_server() -> Server:
@@ -425,166 +229,8 @@ def help_cmd(command_name: Optional[str] = None, parameter_name: Optional[str] =
 ytsync_cli.parsers[LevelNames] = create_enum_parser(LevelNames)
 
 
-async def local_cli(ytsync_server: YouTubeSyncServer) -> int:
-    while ytsync_server.websocket_server.is_serving():
-        user_input_task: Task[str] = create_task(input_async(ytsync_cli.prompt_entry_marker))
-        ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: user_input_task.cancel())
-        try:
-            user_input: str = await user_input_task
-        except EOFError:
-            await asyncio.sleep(30)
-            continue
-
-        try:
-            entries: list[str] = split(user_input)
-        except Exception as exc:
-            print(f"{"\n".join(f"{e.__class__.__name__}: {e}" for e in causes(exc, True))}", file=stderr)
-            continue
-
-        try:
-            cli_handler.command_result_logging = True
-            retval = cli_retval_return_value(ytsync_cli.exec(entries))[1]
-        except EmptyEntriesError:
-            cli_handler.command_result_logging = False
-            continue
-        except (CLIError, UserError) as err:
-            if isinstance(err, CLIError) and err.__cause__:
-                err = err.__cause__
-            logger.error(format_exc(err))
-            cli_handler.command_result_logging = False
-            continue
-        finally:
-            cli_handler.command_result_logging = False
-
-        if iscoroutine(retval):
-            retval = await retval
-
-        if isinstance(retval, CommandResult):
-            for log in retval.logs:
-                logger.handle(log)
-            for output in retval.outputs:
-                print(output.output, end=output.end, file=stdout if output.direction == OutputDirection.stdout else stderr)
-
-    return 0
-
-
-async def recv_line(sock: socket) -> bytearray:
-    received: bytearray = bytearray()
-    loop: AbstractEventLoop = get_event_loop()
-
-    while True:
-        b: bytes = await loop.sock_recv(sock, 1)
-        if not b:
-            raise EOFError()
-
-        if b[0] == ord('\n'):
-            break
-        received.append(b[0])
-
-    return received
-
-
-async def remote_cli(ytsync_server: YouTubeSyncServer) -> int:
-
-    def log_prefix(s: Any) -> str:
-        return f"[{remote_cli.__name__}] {s}"
-
-    loop: AbstractEventLoop = get_event_loop()
-
-    with socket(AddressFamily.AF_INET, SocketKind.SOCK_STREAM, IPPROTO_TCP) as listener:
-        listener.setblocking(False)
-        listener.bind(("127.0.0.1", REMOTE_PORT))
-        listener.listen(1)
-
-        while ytsync_server.websocket_server.is_serving():
-            accept_task = create_task(loop.sock_accept(listener))
-            ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: accept_task.cancel())
-            client, client_addr = await accept_task
-            logger.info(f"{client_addr} connected.")
-
-            try:
-                initialization_json: str = (await wait_for(recv_line(client), timeout=REMOTE_CLI_STEP_TIMEOUT)).decode()
-            except EOFError:
-                logger.info(log_prefix("Disconnected"))
-                client.close()
-                continue
-            except TimeoutError:
-                logger.error(log_prefix("Timed our waiting for initialization"))
-                continue
-
-            try:
-                initialization: RemoteInitialization = RemoteInitialization(**loads(initialization_json))
-            except TypeError as e:
-                logger.error(log_prefix(e))
-                client.close()
-                continue
-            logger.info(log_prefix(f"{remote_cli.__name__}> {initialization}"))
-
-            request: UserInputRequest = UserInputRequest(prompt=ytsync_cli.prompt_entry_marker)
-            client.send(dumps(asdict(request)).encode() + MESSAGE_DELIMITER)
-            logger.info(log_prefix(f"{remote_cli.__name__}> {request}"))
-
-            try:
-                user_input_json: str = (await wait_for(recv_line(client), timeout=REMOTE_CLI_STEP_TIMEOUT)).decode()
-            except EOFError:
-                logger.info(log_prefix("Disconnected"))
-                client.close()
-                continue
-            except TimeoutError:
-                logger.error(log_prefix("Timed our waiting for user input"))
-                continue
-
-            try:
-                user_input: UserInput = UserInput(**loads(user_input_json))
-            except TypeError as e:
-                logger.error(log_prefix(e))
-                client.close()
-                continue
-
-            return_value: Any = None
-            try:
-                command, return_value = cli_retval_return_value(ytsync_cli.exec(user_input.args))
-                if iscoroutine(return_value):
-                    task: Task[Any] = create_task(return_value)
-                    ytsync_server.websocket_server.closed_waiter.add_done_callback(lambda _: task.cancel())
-                    return_value = await task
-                outputs: list[Output]
-                if isinstance(return_value, CommandResult):
-                    outputs = return_value.outputs
-                    for log in return_value.logs:
-                        logger.handle(log)
-                    for output in return_value.outputs:
-                        print(output.output, end=output.end, file=stdout if output.direction == OutputDirection.stdout else stderr)
-                elif return_value is not None:
-                    outputs = [Output(OutputDirection.stdout, str(return_value))]
-                else:
-                    outputs = []
-
-                response: list[dict[str, str]] = [asdict(output) for output in outputs]
-                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
-                logger.info(log_prefix(f"< ({command.name}) {response}"))
-            except EmptyEntriesError as err:
-                response = [asdict(Output(
-                    OutputDirection.stderr,
-                    f"{err.__class__.__name__}: {err.args[0]}"
-                ))]
-                logger.info(log_prefix(f"< {response}"))
-                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
-            except (CLIError, UserError) as err:
-                response = [asdict(Output(
-                    OutputDirection.stderr,
-                    f"{err.__class__.__name__}: {err.args[0]}"
-                ))]
-                logger.error(format_exc(err))
-                logger.info(log_prefix(f"< {response}"))
-                client.send(dumps(response).encode() + MESSAGE_DELIMITER)
-            finally:
-                client.close()
-
-    return 0
-
 # This is done so that npycli sees a generic alias, and stops there at building the parameter, that is, to obfuscate.
-type _CLIKindFunctionGenericReturnType[T] = Callable[[YouTubeSyncServer], Coroutine[Any, Any, T]]
+type _CLIKindFunctionGenericReturnType[T] = Callable[[CLIContext], Coroutine[Any, Any, T]]
 type CLIKindFunction = _CLIKindFunctionGenericReturnType[int]
 
 
@@ -642,7 +288,7 @@ async def ytsync_cli_serve(
 
     async with ytsync(host, port, logger) as ytsync_server:
         ytsync_cli.env["server"] = ytsync_server.websocket_server
-        cli_task: Task[int] = create_task(cli_kind(ytsync_server))
+        cli_task: Task[int] = create_task(cli_kind(CLIContext(ytsync_cli, ytsync_server, cli_handler, logger)))
 
         try:
             _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)

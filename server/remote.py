@@ -1,10 +1,19 @@
-from sys import argv, stdout, stderr
-from dataclasses import asdict
 from asyncio import AbstractEventLoop, get_event_loop, run, wait_for
-from json import loads, dumps
-from socket import socket, AddressFamily, SocketKind, IPPROTO_TCP
+from dataclasses import asdict
+from json import dumps, loads
+from socket import IPPROTO_TCP, AddressFamily, SocketKind, socket
+from sys import argv, stderr, stdout
 from typing import Any, cast
-from server import REMOTE_PORT, MESSAGE_DELIMITER, Output, OutputDirection, UserInput, RemoteInitialization, UserInputRequest, recv_line, REMOTE_CLI_STEP_TIMEOUT
+
+from cli_core import (
+    Output,
+    OutputDirection,
+    RemoteInitialization,
+    UserInput,
+    UserInputRequest,
+)
+from configuration import MESSAGE_DELIMITER, REMOTE_CLI_STEP_TIMEOUT, REMOTE_PORT
+from remote_cli import recv_line
 
 
 async def main() -> int:

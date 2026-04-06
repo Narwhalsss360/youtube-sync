@@ -202,7 +202,7 @@ class VideoQueue:
                 cls,
                 QueuedVideoInfo,
                 f"videos[{i}]",
-                parsed.videos[i],
+                value,
                 False
             ))
 
