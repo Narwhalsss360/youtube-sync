@@ -40,8 +40,14 @@ from ytsync_types import (
     parse_message,
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+
+_logger: logging.Logger | None = None
+
+
+def get_logger() -> logging.Logger:
+    if _logger is None:
+        return logging.getLogger()
+    return _logger
 
 
 connected_users_by_uuid: dict[str, User] = {}
@@ -68,7 +74,7 @@ async def send_to(
     user: User, message: Message, log_level: int, log_message: str | None = None
 ) -> None:
     if log_level != logging.NOTSET:
-        logger.log(
+        get_logger().log(
             log_level,
             f"SEND({user.uuid} <- {message}){f', {log_message}' if log_message is not None else ''}",
         )
@@ -93,7 +99,7 @@ async def broadcast(
     )
 
     if log_level != logging.NOTSET:
-        logger.log(
+        get_logger().log(
             log_level,
             f"BROADCAST({len(broadcast_to)} user(s)) <- {message}){f', {log_message}' if log_message is not None else ''}",
         )
@@ -105,7 +111,7 @@ async def broadcast(
             continue
 
         if isinstance(result, ConnectionClosed):
-            logger.error(result)
+            get_logger().error(result)
             await handle_disconnect(user)
             continue
 
@@ -116,7 +122,7 @@ async def handle_disconnect(user: User) -> None:
     if user.uuid in connected_users_by_uuid:
         del connected_users_by_uuid[user.uuid]
 
-    logger.info(f"User {user} disconnect is being handled.")
+    get_logger().info(f"User {user} disconnect is being handled.")
     if user.connection:
         await user.connection.close()
 
@@ -224,7 +230,7 @@ async def handle_non_clerical_message(
         )
         return
 
-    logger.error(f"Dropped message from {this_user}: {message}")
+    get_logger().error(f"Dropped message from {this_user}: {message}")
 
 
 async def connection_handler(connection: ServerConnection) -> None:
@@ -237,7 +243,7 @@ async def connection_handler(connection: ServerConnection) -> None:
                 if this_user is None:
                     error_message: ErrorMessage = ErrorMessage(e.message, "Server")
                     await connection.send(dumps(asdict(error_message)))
-                    logger.error(f"Bad data from {connection.remote_address}: {error_message}")
+                    get_logger().error(f"Bad data from {connection.remote_address}: {error_message}")
                     await connection.close()
                     return
                 else:
@@ -248,7 +254,7 @@ async def connection_handler(connection: ServerConnection) -> None:
                 if not isinstance(message, ServerHandshakeRequestMessage):
                     error_message: ErrorMessage = ErrorMessage(f"First message must be '{ServerHandshakeRequestMessage.MESSAGE_TYPE_VALUE}'.", "Server")
                     await connection.send(dumps(asdict(error_message)))
-                    logger.error(f"Did not get a handshake request from {connection.remote_address}: {error_message}")
+                    get_logger().error(f"Did not get a handshake request from {connection.remote_address}: {error_message}")
                     await connection.close()
                     return
 
@@ -265,7 +271,7 @@ async def connection_handler(connection: ServerConnection) -> None:
 
             this_user.last_communication_time = time.time()
             if isinstance(message, ErrorMessage):
-                logger.error(f"Error message from {this_user.uuid}: {message}")
+                get_logger().error(f"Error message from {this_user.uuid}: {message}")
                 continue
 
             if isinstance(message, AcknowledgeMessage):
@@ -292,9 +298,9 @@ async def connection_handler(connection: ServerConnection) -> None:
 
             await handle_non_clerical_message(this_user, message)
     except ConnectionClosedOK:
-        logger.info(f"Connection closed by user {connection.remote_address}.")
+        get_logger().info(f"Connection closed by user {connection.remote_address}.")
     except ConnectionClosed as e:
-        logger.error(e)
+        get_logger().error(e)
     finally:
         if this_user is not None:
             await handle_disconnect(this_user)
@@ -378,8 +384,10 @@ class YouTubeSyncServer:
 async def ytsync(
     host: str,
     port: int,
-    logger: LoggerLike | None = None,
+    logger: logging.Logger | None = None,
 ) -> AsyncIterator[YouTubeSyncServer]:
+    global _logger
+    _logger = logger
     async with serve(connection_handler, host, port, logger=logger) as server:
         serve_task: Task[None] = create_task(server.serve_forever())
         heartbeat_task: Task[None] = create_task(heartbeat(server))

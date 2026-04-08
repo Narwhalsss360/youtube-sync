@@ -258,6 +258,10 @@ def cli_kind_parser(s: str) -> CLIKind:
 ytsync_cli.parsers[CLIKind] = cli_kind_parser
 
 
+def generate_cli_kind_description() -> Description:
+    return Description(f"CLI kind: {", ".join([kind for kind in cli_kinds.keys()])}.")
+
+
 async def ytsync_cli_serve(
     host: str,
     port: int,
@@ -274,7 +278,7 @@ async def ytsync_cli_serve(
     cli_kind: Annotated[
         CLIKind,
         Alias("cli-kind", private=True),
-        Description(f"CLI kind, some of which are {", ".join([kind for kind in cli_kinds.keys()])}."),
+        generate_cli_kind_description(),
         DefaultPreview("local")
     ] = local_cli
 ) -> int:
@@ -310,18 +314,21 @@ ytsync_cli_serve_cmd: Command = Command.create(
 )
 
 
-def serve_with(args: list[str]) -> None:
-    try:
-        if len(args) == 0:
-            print(ytsync_cli_serve_cmd.extended_command_help())
-        else:
-            exit(run(ytsync_cli_serve_cmd(args, ytsync_cli.parsers)))
-    except KeyboardInterrupt:
-        print("\n^C")
+def update_cli_serve_cmd_cli_kind_description() -> None:
+    cli_kind_parameter: CommandParameter | None = next(filter(lambda p: CLIKind in p.argument_types, ytsync_cli_serve_cmd.parameters), None)
+    assert cli_kind_parameter is not None
+    cli_kind_parameter.description = generate_cli_kind_description().description
 
 
 def main() -> None:
-    serve_with(argv[1:])
+    update_cli_serve_cmd_cli_kind_description()
+    try:
+        if len(argv) == 1:
+            print(ytsync_cli_serve_cmd.extended_command_help())
+        else:
+            exit(run(ytsync_cli_serve_cmd(argv[1:], ytsync_cli.parsers)))
+    except KeyboardInterrupt:
+        print("\n^C")
 
 
 if __name__ == "__main__":
