@@ -264,6 +264,10 @@ async def connection_handler(connection: ServerConnection) -> None:
                 continue
 
             this_user.last_communication_time = time.time()
+            if isinstance(message, ErrorMessage):
+                logger.error(f"Error message from {this_user.uuid}: {message}")
+                continue
+
             if isinstance(message, AcknowledgeMessage):
                 if this_user.waiting_for_acknowledge:
                     this_user.waiting_for_acknowledge.pop()
