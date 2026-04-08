@@ -38,7 +38,15 @@ input, button {
   color: black;
 }
 
-.forms-container {
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  margin: 3px;
+  background-color: white;
+  border-radius: 5px;
+}
+
+.vstack {
   display: flex;
   flex-direction: column;
   width: stretch;
@@ -75,6 +83,8 @@ input, button {
 .disconnect-form input {
   width: 90%;
 }
+
+.settings-container {}
 
 .users {
   display: flex;

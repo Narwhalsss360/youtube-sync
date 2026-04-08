@@ -47,7 +47,10 @@ import {
   ContinuationOption,
   PlaybackState,
   NotifyMessage,
-  PlaybackControlMessage
+  PlaybackControlMessage,
+  ServiceSettings,
+  isServiceSettings,
+  isUser
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -63,8 +66,7 @@ const serviceState: {
   pendingServerRequests: Array<GenericMessage>,
   contentPorts: Array<browser.runtime.Port>,
   notifications: Array<Notification>,
-  waitOnDeviation: number,
-  popupNotifications: boolean
+  settings: ServiceSettings
 } = {
   user: structuredClone(userDefaults),
   users: [],
@@ -74,8 +76,7 @@ const serviceState: {
   pendingServerRequests: [],
   contentPorts: [],
   notifications: [],
-  waitOnDeviation: 1,
-  popupNotifications: true
+  settings: { waitOnDeviation: 1, popupNotifications: true }
 };
 
 function packageServiceState(): PackagedServiceState {
@@ -150,6 +151,63 @@ function processSelfUpdateFromServer(user: User, broadcast: boolean = false): vo
   }
 }
 
+function processSelfUpdateFromRuntime(user: User) {
+  if (serviceState.user.uuid !== user.uuid) {
+    throw new Error("This function requires this user's and user's uuid to match");
+  }
+
+  const updates = detectUserUpdates(serviceState.user, user);
+  if (updates.find(update => [
+    "uuid",
+    "connectionQuality",
+    "videoInfo",
+    "followerUUIDs",
+    "videoQueue"
+   ].includes(update))
+  ) {
+    console.error(`Received self user update from runtime which is not allowed. Updates from runtime: ${updates.join(", ")}`);
+  }
+
+  serviceState.user.username = user.username
+  serviceState.user.hostingOptions = user.hostingOptions;
+  serviceState.user.followingOptions = user.followingOptions;
+  serviceState.user.reconnectToServerOnLoss = user.reconnectToServerOnLoss;
+  serviceState.user.followingUUID = user.followingUUID;
+
+  const packagedServiceStateMessage = broadcastPackagedStateToRuntime(true);
+  serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+  notifyServerOfSelf();
+}
+
+async function persist(): Promise<void> {
+  await browser.storage.local.set({
+    youTubeSyncServiceSettings: serviceState.settings,
+    youTubeSyncPersistentUser: serviceState.user
+  });
+}
+
+async function fromPersistent(): Promise<void> {
+  const loadedObjects = await browser.storage.local.get(["youTubeSyncServiceSettings", "youTubeSyncPersistentUser"])
+  const settings: ServiceSettings | undefined = asType<ServiceSettings>(isServiceSettings, loadedObjects.youTubeSyncServiceSettings);
+  if (settings !== undefined) {
+    serviceState.settings = settings;
+  }
+
+  const persistentUser: User | undefined = asType<User>(isUser, loadedObjects.youTubeSyncPersistentUser);
+  if (persistentUser !== undefined) {
+    serviceState.user.hostingOptions = persistentUser.hostingOptions;
+    serviceState.user.followingOptions = persistentUser.followingOptions;
+    serviceState.user.reconnectToServerOnLoss = persistentUser.reconnectToServerOnLoss;
+
+    const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+    serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+    serviceState.serverConnection?.send(JSON.stringify({
+      type: MessageTypes.User,
+      user: serviceState.user
+    } satisfies UserMessage));
+  }
+}
+
 function insertNotification(notification: Notification): void {
   serviceState.notifications.push(notification);
 }
@@ -157,7 +215,7 @@ function insertNotification(notification: Notification): void {
 let openingPopup: boolean = false;
 
 async function openNotifications(retry: boolean = true) {
-  if (!serviceState.popupNotifications) {
+  if (!serviceState.settings.popupNotifications) {
     return;
   }
 
@@ -362,7 +420,7 @@ function hostingWatchdog() {
         continue;
       }
 
-      if (Math.abs(user.videoInfo.playbackInfo.currentTime - serviceState.user.videoInfo.playbackInfo.currentTime) < serviceState.waitOnDeviation) {
+      if (Math.abs(user.videoInfo.playbackInfo.currentTime - serviceState.user.videoInfo.playbackInfo.currentTime) < serviceState.settings.waitOnDeviation) {
         continue;
       }
 
@@ -1035,6 +1093,22 @@ function processRuntimeMessage(
       serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
     }
+    case MessageTypes.User: {
+      const userMessage: UserMessage = wellDefinedMessage(isUserMessage, MessageTypes.User, message);
+      if (userMessage.user.uuid !== serviceState.user.uuid) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: "Received user update from runtime for another user which is not allowed.",
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        sendResponse(errorMessage);
+        break;
+      }
+
+      processSelfUpdateFromRuntime(userMessage.user);
+      persist();
+      break;
+    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");
@@ -1149,6 +1223,7 @@ async function setCurrentTabAsActiveTab() {
 }
 
 function main() {
+  fromPersistent();
   browser.runtime.onMessage.addListener(processRuntimeMessage);
   browser.runtime.onConnect.addListener(portConnect);
   setInterval(followingWatchdog, FOLLOWING_WATCHDOG_INTERVAL);
@@ -1162,7 +1237,9 @@ function main() {
     broadcastPackagedStateToRuntime,
     openNotifications,
     clearNotifications,
-    notifyServerOfSelf
+    notifyServerOfSelf,
+    persist,
+    fromPersistent
   });
 }
 

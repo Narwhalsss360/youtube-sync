@@ -23,7 +23,8 @@ import {
   wellDefinedMessage,
   Notification,
   NotificationDismissedMessage,
-  isOpenNotificationsMessage
+  isOpenNotificationsMessage,
+  UserMessage
 } from "./types";
 import "./accordions";
 import { accordionHeaderAndContent, requireContainerKind, findParent, isAccordionContainer, isExpanded, accordionExpand } from "./accordions";
@@ -106,6 +107,13 @@ const connectionAccordionContainer: HTMLDivElement = wellDefined(
   constructBadDOMError("Bad connection accordion container")
 );
 
+const settingsAccordionHeaderText: HTMLDivElement = wellDefined(
+  asType<HTMLDivElement>(
+    (element: HTMLElement) => element instanceof HTMLDivElement,
+    document.getElementById("settings-accordion-header-text")
+  ),
+  constructBadDOMError("Bad settings accordion header text")
+);
 
 const usersAccordionHeaderText: HTMLDivElement = wellDefined(
   asType<HTMLDivElement>(
@@ -123,7 +131,6 @@ const usersAccordionContainer: HTMLDivElement = wellDefined(
   constructBadDOMError("Bad users accordion containerxt")
 );
 
-
 const notificationsAccordionHeaderText: HTMLDivElement = wellDefined(
   asType<HTMLDivElement>(
     (element: HTMLElement) => element instanceof HTMLDivElement,
@@ -138,6 +145,14 @@ const notificationsAccordionContainer: HTMLDivElement = wellDefined(
     document.getElementById("notifications-accordion-container")
   ),
   constructBadDOMError("Bad notifications accordion containerxt")
+);
+
+const waitForBufferingFollowersCheckbox: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("wait-for-buffering-followers-checkbox"),
+  ),
+  constructBadDOMError("Bad wait for buffering followers checkbox")
 );
 
 const popupState : {
@@ -633,6 +648,9 @@ function applyState(newState: PackagedServiceState) {
     setHidden(disconnectForm, false);
     disconnectServerAddress.value = newState.serverAddress;
   }
+
+  waitForBufferingFollowersCheckbox.checked = newState.user.hostingOptions.waitForBufferingFollowers;
+  enableAllSettings();
 }
 
 function processRuntimeMessage(
@@ -779,12 +797,29 @@ function applyAccordionHeaderPrefixes(textDiv: HTMLDivElement, collapsedPrefix: 
   new MutationObserver(update).observe(textDiv, { childList: true });
 }
 
+function disableAllSettings() {
+  waitForBufferingFollowersCheckbox.disabled = true;
+}
+
+function enableAllSettings() {
+  waitForBufferingFollowersCheckbox.disabled = false;
+}
+
+function applyNewUserSettings() {
+  disableAllSettings();
+  browser.runtime.sendMessage({
+    type: MessageTypes.User,
+    user: popupState.packagedServiceState.user
+  } satisfies UserMessage);
+}
+
 async function main() {
   applyState(wellDefinedMessage(
     isPackagedServiceStateMessage,
     MessageTypes.PackagedServiceState,
     await browser.runtime.sendMessage({ type: MessageTypes.RequestPackagedServiceState })
   ).packagedServiceState);
+
   if (popupState.packagedServiceState.serverAddress === null) {
     accordionExpand(connectionAccordionContainer);
   }
@@ -795,9 +830,15 @@ async function main() {
   applyAccordionHeaderPrefixes(connectionAccordionHeaderText, collapsedPrefix, expandedPrefix);
   applyAccordionHeaderPrefixes(usersAccordionHeaderText, collapsedPrefix, expandedPrefix);
   applyAccordionHeaderPrefixes(notificationsAccordionHeaderText, collapsedPrefix, expandedPrefix);
+  applyAccordionHeaderPrefixes(settingsAccordionHeaderText, collapsedPrefix, expandedPrefix);
   activeTabToggle.addEventListener("click", activeTabToggleActivated);
   connectAsForm.addEventListener("submit", connectAsFormSubmitted);
   disconnectForm.addEventListener("submit", disconnectFormSubmitted);
+
+  waitForBufferingFollowersCheckbox.addEventListener("click", () => {
+    popupState.packagedServiceState.user.hostingOptions.waitForBufferingFollowers = waitForBufferingFollowersCheckbox.checked;
+    applyNewUserSettings();
+  });
 
   (globalThis as any).popup = {
     popupState,

@@ -1367,3 +1367,28 @@ export function wellDefinedMessage<T extends Message>(
 
   return object
 }
+
+export interface ServiceSettings {
+  waitOnDeviation: number,
+  popupNotifications: boolean
+}
+
+export function isServiceSettings(object: any | null | undefined): object is ServiceSettings {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (typeof object.waitOnDeviation !== "number") {
+    return false;
+  }
+
+  if (typeof object.popupNotifications !== "boolean") {
+    return false;
+  }
+
+  return true;
+}

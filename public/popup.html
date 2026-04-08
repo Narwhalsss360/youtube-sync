@@ -9,13 +9,13 @@
   </head>
   <body>
     <script type="module" src="popup.js"></script>
-    <div class="forms-container">
+    <div class="vstack">
       <button id="active-tab-toggle" disabled value="set">Set as active tab</button>
       <div id="connection-accordion-container" class="accordion-container" accordion-group="configuration" accordion-kind="container">
         <div id="connection-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
           <div id="connection-accordion-header-text" class="text-div-dark">Connection</div>
         </div>
-        <div id="connection-accordion-content" class="accordion-content"accordion-kind="content">
+        <div id="connection-accordion-content" class="accordion-content" accordion-kind="content">
           <form id="connect-as-form" class="connect-as-form" hidden>
             <input id="username-input" placeholder="Username..." disabled>
             <input id="server-address-input" placeholder="Server address..." disabled>
@@ -27,9 +27,20 @@
           </form>
         </div>
       </div>
+      <div id="settings-accordion-container" class="accordion-container" accordion-group="configuration" accordion-kind="container">
+        <div id="settings-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
+          <div id="settings-accordion-header-text" class="text-div-dark">Settings</div>
+        </div>
+        <div id="settings-accordion-content" class="accordion-content settings-content" accordion-kind="content">
+          <div class="checkbox-container">
+            <input id="wait-for-buffering-followers-checkbox" type="checkbox">
+            <span for="wait-for-buffering-followers-checkbox" class="text-div-dark">Wait for buffering followers</span>
+          </div>
+        </div>
+      </div>
     </div>
-    <hr>
-    <div class="forms-container">
+    <hr style="width: 100%;">
+    <div class="vstack">
       <div id="notifications-accordion-container" class="accordion-container" accordion-group="main" accordion-kind="container">
         <div id="notifications-accordion-header" class="accordion-header popup-accordion-header" accordion-kind="header">
           <div id="notifications-accordion-header-text" class="text-div-dark">Notifications</div>
