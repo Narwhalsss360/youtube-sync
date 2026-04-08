@@ -299,12 +299,8 @@ async def ytsync_cli_serve(
     async with ytsync(host, port, logger) as ytsync_server:
         ytsync_cli.env["server"] = ytsync_server.websocket_server
         cli_task: Task[int] = create_task(cli_kind(CLIContext(ytsync_cli, ytsync_server, cli_handler, logger)))
-
-        try:
-            _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
-            return cli_result
-        except (CancelledError, KeyboardInterrupt):
-            return 1
+        _, cli_result = await gather(ytsync_server.ytsync_serve_task, cli_task)
+        return cli_result
 
 
 ytsync_cli_serve_cmd: Command = Command.create(
@@ -320,15 +316,21 @@ def update_cli_serve_cmd_cli_kind_description() -> None:
     cli_kind_parameter.description = generate_cli_kind_description().description
 
 
-def main() -> None:
+async def serve_with(args: list[str]) -> int:
     update_cli_serve_cmd_cli_kind_description()
     try:
-        if len(argv) == 1:
+        if len(args) == 0:
             print(ytsync_cli_serve_cmd.extended_command_help())
+            return 0
         else:
-            exit(run(ytsync_cli_serve_cmd(argv[1:], ytsync_cli.parsers)))
-    except KeyboardInterrupt:
+            return await ytsync_cli_serve_cmd(args, ytsync_cli.parsers)
+    except (CancelledError, KeyboardInterrupt):
         print("\n^C")
+        return 0
+
+
+def main() -> int:
+    return run(serve_with(argv[1:]))
 
 
 if __name__ == "__main__":
