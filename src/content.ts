@@ -1,6 +1,6 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  arrayEquals, asType, detectQueuedVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackInfo, PlaybackState, QueuedVideoInfo, QueueUpdateMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, VideoQueue, wellDefined, wellDefinedMessage } from "./types";
+import {  arrayEquals, asType, detectQueuedVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isPlaybackControlMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackControlMessage, PlaybackInfo, PlaybackState, QueuedVideoInfo, QueueUpdateMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, VideoQueue, wellDefined, wellDefinedMessage } from "./types";
 
 const ytIcons: NodeListOf<HTMLLinkElement> = document.querySelectorAll("link[rel~='icon']");
 const ogYTIconRef: string = wellDefined(ytIcons[0], new Error("Expected at least one icon link.")).href;
@@ -628,6 +628,23 @@ function processPortMessage(
             list: new URLSearchParams(window.location.search).get("list")
           }
         } satisfies QueueUpdateMessage);
+      }
+      break;
+    }
+    case MessageTypes.PlaybackControl: {
+      const playbackControlMessage: PlaybackControlMessage = wellDefinedMessage(isPlaybackControlMessage, MessageTypes.PlaybackControl, message);
+      const videoElement: HTMLVideoElement | null = document.querySelector("video");
+      if (videoElement === null) {
+        console.warn(`${processRuntimeMessage.name}: Received early PlaybackControlMessage`);
+        break;
+      }
+
+      if (playbackControlMessage.paused !== null) {
+        if (playbackControlMessage.paused && !videoElement.paused) {
+          videoElement.pause();
+        } else if (!playbackControlMessage.paused && videoElement.paused) {
+          videoElement.play();
+        }
       }
       break;
     }

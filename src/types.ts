@@ -240,7 +240,7 @@ export function detectVideoQueueUpdates(videoQueue: VideoQueue | undefined | nul
   }
 
   const comparers: ComparersDefinitions = {
-    videos: arrayEquals,
+    videos: (v1, v2) => arrayEquals(v1, v2, (qv1, qv2) => detectVideoQueueUpdates(qv1, qv2).length > 0),
   };
 
   return Object.keys(newVideoQueue)
@@ -697,7 +697,8 @@ export enum MessageTypes {
   Notify = "notify",
   NotificationDismissed = "notification-dismissed",
   OpenNotifications = "open-notifications",
-  QueueUpdate = "queue-update"
+  QueueUpdate = "queue-update",
+  PlaybackControl = "playback-control"
 };
 
 export interface GenericMessage {
@@ -1280,6 +1281,33 @@ export function isQueueUpdateMessage(object: any | null | undefined): object is 
   return true;
 }
 
+export interface PlaybackControlMessage extends GenericMessage {
+  type: MessageTypes.PlaybackControl,
+  paused: boolean | null
+};
+
+export function isPlaybackControlMessage(object: any | null | undefined): object is PlaybackControlMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.PlaybackControl) {
+    return false;
+  }
+
+  if (object.paused !== null) {
+    if (typeof object.paused !== "boolean") {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -1302,7 +1330,8 @@ export type Message = (
   NotifyMessage |
   NotificationDismissedMessage |
   OpenNotificationsMessage |
-  QueueUpdateMessage
+  QueueUpdateMessage |
+  PlaybackControlMessage
 );
 
 export function wellDefinedMessage<T extends Message>(

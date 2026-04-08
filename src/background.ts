@@ -42,7 +42,12 @@ import {
   isNotifyMessage,
   isNotificationDismissedMessage,
   OpenNotificationsMessage,
-  isQueueUpdateMessage
+  isQueueUpdateMessage,
+  ConnectionQuality,
+  ContinuationOption,
+  PlaybackState,
+  NotifyMessage,
+  PlaybackControlMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -57,7 +62,9 @@ const serviceState: {
   reconnectToTab: number | null,
   pendingServerRequests: Array<GenericMessage>,
   contentPorts: Array<browser.runtime.Port>,
-  notifications: Array<Notification>
+  notifications: Array<Notification>,
+  waitOnDeviation: number,
+  popupNotifications: boolean
 } = {
   user: structuredClone(userDefaults),
   users: [],
@@ -66,7 +73,9 @@ const serviceState: {
   reconnectToTab: null,
   pendingServerRequests: [],
   contentPorts: [],
-  notifications: []
+  notifications: [],
+  waitOnDeviation: 1,
+  popupNotifications: true
 };
 
 function packageServiceState(): PackagedServiceState {
@@ -109,13 +118,17 @@ function processSelfUpdateFromServer(user: User, broadcast: boolean = false): vo
     serviceState.pendingServerRequests.splice(pendingFollowingChangesIndex, 1);
   }
 
+  if (broadcast) {
+    serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
+  }
   if (updates.find(update => [
       "uuid",
       "username",
       "hostingOptions",
       "followingOptions",
       "reconnectToServerOnLoss",
-      "videoInfo"
+      "videoInfo",
+      "videoQueue"
     ].includes(update))
   ) {
     console.error(`Received self user update from server which is not allowed. Updates from server: ${updates.join(", ")}`);
@@ -134,7 +147,6 @@ function processSelfUpdateFromServer(user: User, broadcast: boolean = false): vo
   if (broadcast) {
     const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
     serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
-    serviceState.serverConnection.send(JSON.stringify(acknowledgeMessage));
   }
 }
 
@@ -145,6 +157,10 @@ function insertNotification(notification: Notification): void {
 let openingPopup: boolean = false;
 
 async function openNotifications(retry: boolean = true) {
+  if (!serviceState.popupNotifications) {
+    return;
+  }
+
   const openNotificationsMessage: OpenNotificationsMessage = {
     type: MessageTypes.OpenNotifications
   };
@@ -236,6 +252,143 @@ function notifyServerOfSelf() {
     user: serviceState.user
   };
   serviceState.serverConnection.send(JSON.stringify(userMessage));
+}
+
+const FOLLOWING_WATCHDOG_INTERVAL: number = 200
+
+function followingWatchdog() {
+  if (serviceState.user.followingUUID === null) {
+    return;
+  }
+
+  const following: User | undefined = serviceState.users.find(user => user.uuid === serviceState.user.followingUUID);
+  if (following === undefined) {
+    console.warn(`${followingWatchdog.name}: Following a user that doesn't exist`);
+    return;
+  }
+
+  switch (serviceState.user.connectionQuality) {
+    case ConnectionQuality.Good: break;
+    case ConnectionQuality.Bad:
+    case ConnectionQuality.Degraded: {
+      switch (serviceState.user.followingOptions.onDegradedConnectionContinuationOption) {
+        case ContinuationOption.Nothing: break;
+        case ContinuationOption.BreakFollow: {
+          if (following.videoInfo?.playbackInfo.state === PlaybackState.Paused) {
+            return;
+          }
+
+          processRuntimeMessage({
+            type: MessageTypes.Notify,
+            notification: {
+              epoch: Date.now(),
+              message: `Breaking from ${following.username} since your connection quality is ${following.connectionQuality}.`,
+              sender: "Background Service Worker Following Watchdog",
+              dismissed: false,
+            },
+          } satisfies NotifyMessage, {}, () => {});
+
+          processRuntimeMessage({
+            type: MessageTypes.StopFollowing,
+            followingUUID: serviceState.user.followingUUID
+          } satisfies StopFollowingMessage, {}, () => {});
+          return;
+        }
+        case ContinuationOption.Pause: break;
+      }
+      break;
+    }
+  }
+
+  switch (following.connectionQuality) {
+    case ConnectionQuality.Good: break;
+    case ConnectionQuality.Bad:
+    case ConnectionQuality.Degraded: {
+      switch (serviceState.user.followingOptions.onHostDegradedConnectionContinuationOption) {
+        case ContinuationOption.Nothing: break;
+        case ContinuationOption.BreakFollow: {
+          processRuntimeMessage({
+            type: MessageTypes.StopFollowing,
+            followingUUID: serviceState.user.followingUUID
+          } satisfies StopFollowingMessage, {}, () => {});
+
+          processRuntimeMessage({
+            type: MessageTypes.Notify,
+            notification: {
+              epoch: Date.now(),
+              message: `Breaking from ${following.username} since their connection quality is ${following.connectionQuality}.`,
+              sender: "Background Service Worker Following Watchdog",
+              dismissed: false,
+            },
+          } satisfies NotifyMessage, {}, () => {});
+          return;
+        }
+        case ContinuationOption.Pause: break;
+      }
+      break;
+    }
+  }
+}
+
+const HOSTING_WATCHDOG_INTERVAL: number = FOLLOWING_WATCHDOG_INTERVAL;
+let waitingForUUID: string | null = null;
+
+function hostingWatchdog() {
+  if (serviceState.user.videoInfo === null) {
+    waitingForUUID = null;
+    return;
+  }
+
+  if (waitingForUUID !== null) {
+    const waitingFor: User | undefined = serviceState.users.find(user => user.uuid === waitingForUUID);
+    if (waitingFor === undefined) {
+      waitingForUUID = null;
+    } else if (waitingFor.videoInfo?.playbackInfo.state !== PlaybackState.Waiting) {
+      waitingForUUID = null;
+    }
+  }
+
+  if (serviceState.user.hostingOptions.waitForBufferingFollowers && serviceState.activeTabPort !== null && waitingForUUID === null) {
+    for (const user of serviceState.users) {
+      if (!serviceState.user.followerUUIDs.includes(wellDefined(user.uuid, new Error("All users must have a UUID.")))) {
+        continue;
+      }
+
+      if (user.videoInfo === null) {
+        continue;
+      }
+
+      if (user.videoInfo.playbackInfo.state !== PlaybackState.Waiting) {
+        continue;
+      }
+
+      if (Math.abs(user.videoInfo.playbackInfo.currentTime - serviceState.user.videoInfo.playbackInfo.currentTime) < serviceState.waitOnDeviation) {
+        continue;
+      }
+
+      if (user.connectionQuality === ConnectionQuality.Bad) {
+        console.warn(`Skipping wait for ${user.username} since their connection quality indicates a possible lock state.`);
+        continue;
+      }
+
+      waitingForUUID = user.uuid;
+
+      serviceState.activeTabPort.postMessage({
+        type: MessageTypes.PlaybackControl,
+        paused: true
+      } satisfies PlaybackControlMessage);
+
+      processRuntimeMessage({
+        type: MessageTypes.Notify,
+        notification: {
+          epoch: Date.now(),
+          message: `Waiting for ${user.username}...`,
+          sender: "Background Service Worker",
+          dismissed: false
+        }
+      } satisfies NotifyMessage, {}, () => {})
+    }
+  }
 }
 
 function cleanupServerConnection() {
@@ -998,6 +1151,8 @@ async function setCurrentTabAsActiveTab() {
 function main() {
   browser.runtime.onMessage.addListener(processRuntimeMessage);
   browser.runtime.onConnect.addListener(portConnect);
+  setInterval(followingWatchdog, FOLLOWING_WATCHDOG_INTERVAL);
+  setInterval(hostingWatchdog, HOSTING_WATCHDOG_INTERVAL);
 
   (globalThis as any).backgroundService = Object.freeze({
     serviceState,
