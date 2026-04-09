@@ -627,6 +627,14 @@ function updateNotificationData(notification: Notification): void {
 function applyState(newState: PackagedServiceState): void {
   const withSelf = popupState.usersWithSelf();
   if (newState.serverAddress !== null) {
+    if (popupState.packagedServiceState.user.username !== newState.user.username) {
+      browser.storage.local.set({ lastUsername: newState.user.username });
+    }
+    if (popupState.packagedServiceState.serverAddress !== newState.serverAddress) {
+      browser.storage.local.set({ lastServerAddress: newState.serverAddress });
+    }
+
+    popupState.packagedServiceState = newState;
     for (const newUserInfo of [newState.user, ...newState.users]) {
       updateUserData(withSelf.find(user => user.uuid === newUserInfo.uuid), newUserInfo);
     };
@@ -642,13 +650,8 @@ function applyState(newState: PackagedServiceState): void {
     }
     connectionAccordionHeaderText.innerText = newState.serverAddress;
 
-    if (popupState.packagedServiceState.user.username !== newState.user.username) {
-      browser.storage.local.set({ lastUsername: newState.user.username });
-    }
-    if (popupState.packagedServiceState.serverAddress !== newState.serverAddress) {
-      browser.storage.local.set({ lastServerAddress: newState.serverAddress });
-    }
   } else {
+    popupState.packagedServiceState = newState;
     popupState.usersDiv.replaceChildren();
     connectionAccordionHeaderText.innerText = "Connection";
   }
@@ -708,7 +711,6 @@ function applyState(newState: PackagedServiceState): void {
   onHostDegradedConnectionContinuationOptionSelect.value = newState.user.followingOptions.onHostDegradedConnectionContinuationOption;
 
   enableAllSettings();
-  popupState.packagedServiceState = newState;
 }
 
 function processRuntimeMessage(

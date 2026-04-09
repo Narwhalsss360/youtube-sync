@@ -1314,7 +1314,10 @@ export function isQueueUpdateMessage(object: any | null | undefined): object is 
 
 export interface PlaybackControlMessage extends GenericMessage {
   type: MessageTypes.PlaybackControl,
-  paused: boolean | null
+  paused: boolean | null,
+  playbackRate: number | null,
+  currentTime: number | null,
+  uuid: string | null
 };
 
 export function isPlaybackControlMessage(object: any | null | undefined): object is PlaybackControlMessage {
@@ -1333,6 +1336,26 @@ export function isPlaybackControlMessage(object: any | null | undefined): object
   if (object.paused !== null) {
     if (typeof object.paused !== "boolean") {
       return false;
+    }
+  }
+
+  if (object.playbackRate !== null) {
+    if (typeof object.playbackRate !== "number") {
+      return false;
+    }
+  }
+
+  if (object.currentTime !== null) {
+    if (typeof object.currentTime !== "number") {
+      return false;
+    }
+  }
+
+  if (object.uuid !== null) {
+    if (typeof object.uuid === "string") {
+      if (object.uuid.length === 0) {
+        return false;
+      }
     }
   }
 

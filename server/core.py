@@ -27,6 +27,7 @@ from ytsync_types import (
     FollowMessage,
     KeepAliveMessage,
     Message,
+    PlaybackControlMessage,
     PlaybackState,
     ReceivableMessage,
     ServerHandshakeMessage,
@@ -228,6 +229,18 @@ async def handle_non_clerical_message(
             logging.INFO,
             f"{this_user.username} is no longer following.",
         )
+        return
+
+    if isinstance(message, PlaybackControlMessage):
+        if this_user.followingUUID is None:
+            return
+        if (following := connected_users_by_uuid.get(this_user.followingUUID, None)) is None:
+            get_logger().error(f"User followingUUID is unknown. {this_user.uuid} is _apparently_ following {this_user.followingUUID}.")
+            return
+        if this_user.uuid not in following.hostingOptions.cohostsUUID:
+            return
+
+        await send_to(following, message, logging.DEBUG)
         return
 
     get_logger().error(f"Dropped message from {this_user}: {message}")

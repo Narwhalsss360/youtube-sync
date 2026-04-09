@@ -51,7 +51,8 @@ import {
   ServiceSettings,
   isServiceSettings,
   isUser,
-  isServiceSettingsUpdatesMessage
+  isServiceSettingsUpdatesMessage,
+  isPlaybackControlMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -435,7 +436,10 @@ function hostingWatchdog() {
 
       serviceState.activeTabPort.postMessage({
         type: MessageTypes.PlaybackControl,
-        paused: true
+        paused: true,
+        currentTime: null,
+        playbackRate: null,
+        uuid: null
       } satisfies PlaybackControlMessage);
 
       processRuntimeMessage({
@@ -653,6 +657,31 @@ function processServerMessage(message: Message) {
       serviceState.serverConnection.send(JSON.stringify(errorMessage));
       break;
     }
+    case MessageTypes.PlaybackControl: {
+      const playbackControlMessage: PlaybackControlMessage = wellDefinedMessage(isPlaybackControlMessage, MessageTypes.PlaybackControl, message);
+      if (playbackControlMessage.uuid === null) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: `Server may not send a ${MessageTypes.PlaybackControl} message without a uuid.`,
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        serviceState.serverConnection.send(JSON.stringify(errorMessage));
+        break;
+      }
+
+      if (!serviceState.user.hostingOptions.cohostsUUID.includes(playbackControlMessage.uuid)) {
+        const errorMessage: ErrorMessage = {
+          type: MessageTypes.Error,
+          message: `Server may not send a ${MessageTypes.PlaybackControl} message for non-co-host.`,
+          sender: `${serviceState.user.uuid}: Background Service Worker`
+        };
+        serviceState.serverConnection.send(JSON.stringify(errorMessage));
+        break;
+      }
+
+      serviceState.activeTabPort?.postMessage(playbackControlMessage);
+      break;
+    }
     default: {
       console.group("Dropped message:");
       console.warn("Sender:");
@@ -689,8 +718,7 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       );
       serviceState.user.videoInfo = videoInfoMessage.videoInfo;
       notifyServerOfVideoInfo();
-      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
-      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      broadcastPackagedStateToRuntime();
       break;
     }
     case MessageTypes.QueueUpdate: {
@@ -707,8 +735,7 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       }
 
       notifyServerOfSelf();
-      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
-      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      broadcastPackagedStateToRuntime();
       break;
     }
     case MessageTypes.Notify: {
@@ -747,6 +774,16 @@ function processActiveTabMessage(message: Message, port: browser.runtime.Port) {
       notification.dismissed = true;
       const packagedServiceStateMessage: PackagedServiceStateMessage = broadcastPackagedStateToRuntime();
       serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
+      break;
+    }
+    case MessageTypes.PlaybackControl: {
+      const playbackControlMessage = wellDefinedMessage(isPlaybackControlMessage, MessageTypes.PlaybackControl, message);
+      if (serviceState.serverConnection === null) {
+        break;
+      }
+
+      playbackControlMessage.uuid = serviceState.user.uuid;
+      serviceState.serverConnection.send(JSON.stringify(playbackControlMessage));
       break;
     }
     default: {

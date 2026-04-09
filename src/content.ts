@@ -373,35 +373,175 @@ function getPlaybackInfo(video: HTMLVideoElement): PlaybackInfo {
   }
 }
 
-function getPlaybackInfoAndSend(evt: Event) {
-  const following = moduleState.packagedServiceState?.users.find(user => moduleState.packagedServiceState?.user.followingUUID === user.uuid && user.videoInfo);
-  let followPromise = following ? follow(following) : Promise.resolve();
+function getPlaybackInfoAndSend(video: HTMLVideoElement) {
+  if (moduleState.videoInfoCache === null) {
+    return;
+  }
+  moduleState.videoInfoCache.playbackInfo = getPlaybackInfo(video);
+  sendVideoInfo();
+}
 
-  followPromise.then(() => {
-    if (moduleState.videoInfoCache === null) {
-      return;
-    }
+let inhibitCohostControl: boolean = false;
 
-    const video = evt.target as HTMLVideoElement;
-    moduleState.videoInfoCache.playbackInfo = getPlaybackInfo(video);
-    sendVideoInfo();
-  })
+async function onPlaying(): Promise<void> {
+  const video: HTMLVideoElement = await waitForVideoElement();
+  getPlaybackInfoAndSend(video);
+
+  if (moduleState.packagedServiceState === null || moduleState.packagedServiceState?.user.followingUUID === null || moduleState.packagedServiceState.user.uuid === null) {
+    return;
+  }
+
+  const following: User | undefined = moduleState.packagedServiceState.users.find(user => user.uuid === moduleState.packagedServiceState?.user.followingUUID);
+
+  if (following === undefined) {
+    return
+  }
+
+  if (!inhibitCohostControl && following.hostingOptions.cohostsUUID.includes(moduleState.packagedServiceState.user.uuid)) {
+    moduleState.backgroundServicePort?.postMessage({
+      type: MessageTypes.PlaybackControl,
+      paused: false,
+      currentTime: null,
+      playbackRate: null,
+      uuid: null
+    } satisfies PlaybackControlMessage);
+    return;
+  }
+
+  await follow(following);
+}
+
+async function onPause(): Promise<void> {
+  const video: HTMLVideoElement = await waitForVideoElement();
+  getPlaybackInfoAndSend(video); 
+
+  if (moduleState.packagedServiceState === null || moduleState.packagedServiceState?.user.followingUUID === null || moduleState.packagedServiceState.user.uuid === null) {
+    return;
+  }
+
+  const following: User | undefined = moduleState.packagedServiceState.users.find(user => user.uuid === moduleState.packagedServiceState?.user.followingUUID);
+
+  if (following === undefined) {
+    return
+  }
+
+  if (!inhibitCohostControl && following.hostingOptions.cohostsUUID.includes(moduleState.packagedServiceState.user.uuid)) {
+    moduleState.backgroundServicePort?.postMessage({
+      type: MessageTypes.PlaybackControl,
+      paused: true,
+      currentTime: null,
+      playbackRate: null,
+      uuid: null
+    } satisfies PlaybackControlMessage);
+    return;
+  }
+
+  await follow(following);
+}
+
+async function onWaiting(): Promise<void> {
+  const video: HTMLVideoElement = await waitForVideoElement();
+  getPlaybackInfoAndSend(video); 
+
+  if (moduleState.packagedServiceState === null || moduleState.packagedServiceState?.user.followingUUID === null || moduleState.packagedServiceState.user.uuid === null) {
+    return;
+  }
+
+  const following: User | undefined = moduleState.packagedServiceState.users.find(user => user.uuid === moduleState.packagedServiceState?.user.followingUUID);
+
+  if (following === undefined) {
+    return
+  }
+
+  // if (!inhibitCohostControl && following.hostingOptions.cohostsUUID.includes(moduleState.packagedServiceState.user.uuid)) {
+  //   moduleState.backgroundServicePort?.postMessage({
+  //     type: MessageTypes.PlaybackControl,
+  //     paused: false,
+  //     currentTime: null,
+  //     playbackRate: null,
+  //     uuid: null
+  //   } satisfies PlaybackControlMessage);
+  //   return;
+  // }
+
+  await follow(following);
+}
+
+async function onRateChange(): Promise<void> {
+  const video: HTMLVideoElement = await waitForVideoElement();
+  getPlaybackInfoAndSend(video); 
+
+  if (moduleState.packagedServiceState === null || moduleState.packagedServiceState?.user.followingUUID === null || moduleState.packagedServiceState.user.uuid === null) {
+    return;
+  }
+
+  const following: User | undefined = moduleState.packagedServiceState.users.find(user => user.uuid === moduleState.packagedServiceState?.user.followingUUID);
+
+  if (following === undefined) {
+    return
+  }
+
+  if (!inhibitCohostControl && following.hostingOptions.cohostsUUID.includes(moduleState.packagedServiceState.user.uuid)) {
+    moduleState.backgroundServicePort?.postMessage({
+      type: MessageTypes.PlaybackControl,
+      paused: null,
+      currentTime: null,
+      playbackRate: video.playbackRate,
+      uuid: null
+    } satisfies PlaybackControlMessage);
+    return;
+  }
+
+  await follow(following);
+}
+
+async function onTimeUpdate(): Promise<void> {
+  const video: HTMLVideoElement = await waitForVideoElement();
+  getPlaybackInfoAndSend(video); 
+
+  if (moduleState.packagedServiceState === null || moduleState.packagedServiceState?.user.followingUUID === null || moduleState.packagedServiceState.user.uuid === null) {
+    return;
+  }
+
+  const following: User | undefined = moduleState.packagedServiceState.users.find(user => user.uuid === moduleState.packagedServiceState?.user.followingUUID);
+
+  if (following === undefined) {
+    return
+  }
+
+  if (
+    !inhibitCohostControl &&
+    following.hostingOptions.cohostsUUID.includes(moduleState.packagedServiceState.user.uuid) &&
+    following.videoInfo !== null &&
+    Math.abs(video.currentTime - following.videoInfo.playbackInfo.currentTime) > moduleState.maxDeviation
+  ) {
+    moduleState.backgroundServicePort?.postMessage({
+      type: MessageTypes.PlaybackControl,
+      paused: null,
+      currentTime: video.currentTime,
+      playbackRate: null,
+      uuid: null
+    } satisfies PlaybackControlMessage);
+    return;
+  }
+
+  await follow(following);
 }
 
 function registerVideoElementEvents(video: HTMLVideoElement): void {
-  video.addEventListener("playing", getPlaybackInfoAndSend);
-  video.addEventListener("pause", getPlaybackInfoAndSend);
-  video.addEventListener("waiting", getPlaybackInfoAndSend);
-  video.addEventListener("ratechange", getPlaybackInfoAndSend);
-  video.addEventListener("timeupdate", getPlaybackInfoAndSend);
+  video.addEventListener("playing", onPlaying);
+  video.addEventListener("pause", onPause);
+  video.addEventListener("waiting", onWaiting);
+  video.addEventListener("ratechange", onRateChange);
+  video.addEventListener("timeupdate", onTimeUpdate);
 }
 
 function removeVideoElementEvents(video: HTMLVideoElement): void {
-  video.removeEventListener("playing", getPlaybackInfoAndSend);
-  video.removeEventListener("pause", getPlaybackInfoAndSend);
-  video.removeEventListener("waiting", getPlaybackInfoAndSend);
-  video.removeEventListener("ratechange", getPlaybackInfoAndSend);
-  video.removeEventListener("timeupdate", getPlaybackInfoAndSend);
+  video.removeEventListener("playing", onPlaying);
+  video.removeEventListener("pause", onPause);
+  video.removeEventListener("waiting", onWaiting);
+  video.removeEventListener("ratechange", onRateChange);
+  video.removeEventListener("timeupdate", onTimeUpdate);
 }
 
 function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => void) {
@@ -448,8 +588,7 @@ function detectVideoInfo(onVideoInfoChanged: (videoInfo: VideoInfo | null) => vo
   });
 }
 
-const PLAYBACK_SYNC_NOTIFICATION_INTERVAL: number = 60000;
-let notifyOfPlaybackSynchronization: boolean = true;
+
 let mouseX: number = 0;
 
 function showControls() {
@@ -457,6 +596,9 @@ function showControls() {
   controls?.dispatchEvent(new MouseEvent("mousemove",  { bubbles: true, cancelable: false, clientX: mouseX }));
   mouseX = mouseX === 0 ? 1 : 0;
 }
+
+const PLAYBACK_SYNC_NOTIFICATION_INTERVAL: number = 60000;
+let notifyOfPlaybackSynchronization: boolean = true;
 
 async function follow(user: User): Promise<void> {
   if (user.videoInfo === null) {
@@ -482,7 +624,9 @@ async function follow(user: User): Promise<void> {
   if (user.videoInfo.playbackInfo.state === PlaybackState.Waiting) {
     if (!video.paused) {
       video.pause();
+      inhibitCohostControl = true;
       video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      inhibitCohostControl = false;
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
         notification: {
@@ -500,7 +644,9 @@ async function follow(user: User): Promise<void> {
   }
 
   if (user.videoInfo.playbackInfo.playbackRate !== video.playbackRate) {
+    inhibitCohostControl = true;
     video.playbackRate = user.videoInfo.playbackInfo.playbackRate;
+    inhibitCohostControl = false;
     const notifyMessage: NotifyMessage = {
       type: MessageTypes.Notify,
       notification: {
@@ -516,7 +662,9 @@ async function follow(user: User): Promise<void> {
 
   if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
     if (!video.paused) {
+      inhibitCohostControl = true;
       video.pause();
+      inhibitCohostControl = false;
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
         notification: {
@@ -530,7 +678,9 @@ async function follow(user: User): Promise<void> {
       showControls();
     }
     if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
+      inhibitCohostControl = true;
       video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      inhibitCohostControl = false;
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
         notification: {
@@ -547,8 +697,10 @@ async function follow(user: User): Promise<void> {
   }
 
   if (video.paused) {
+    inhibitCohostControl = true;
     video.currentTime = user.videoInfo.playbackInfo.currentTime;
     video.play();
+    inhibitCohostControl = false;
     const notifyMessage: NotifyMessage = {
       type: MessageTypes.Notify,
       notification: {
@@ -564,7 +716,9 @@ async function follow(user: User): Promise<void> {
   }
 
   if (Math.abs(user.videoInfo.playbackInfo.currentTime - video.currentTime) > moduleState.maxDeviation) {
+    inhibitCohostControl = true;
     video.currentTime = user.videoInfo.playbackInfo.currentTime;
+    inhibitCohostControl = false;
     if (notifyOfPlaybackSynchronization) {
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
@@ -581,7 +735,7 @@ async function follow(user: User): Promise<void> {
       setTimeout(() => notifyOfPlaybackSynchronization = true, PLAYBACK_SYNC_NOTIFICATION_INTERVAL);
     }
   }
-  }
+}
 
 function processPortMessage(
   message: Message,

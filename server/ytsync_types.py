@@ -584,6 +584,7 @@ class MessageTypes(str, Enum):
     RequestVideoInfo = "request-video-info"
     KeepAlive = "keep-alive"
     Notify = "notify"
+    PlaybackControl = "playback-control"
 
 
 @dataclass
@@ -881,6 +882,65 @@ class NotifyMessage:
         return parsed
 
 
+@dataclass
+class PlaybackControlMessage:
+    MESSAGE_TYPE_VALUE = MessageTypes.PlaybackControl.value
+    paused: bool | None = field(default=None)
+    playbackRate: float | None = field(default=None)
+    currentTime: float | None = field(default=None)
+    uuid: str = field(default="")
+    type: str = field(default=MESSAGE_TYPE_VALUE)
+
+    @classmethod
+    def from_data(cls: type[Self], data: dict[str, Any] | Self) -> Self:
+        if isinstance(data, cls):
+            return data
+        assert isinstance(data, dict)
+
+        try:
+            parsed: Self = cls(**data)
+        except TypeError as e:
+            raise DataParseError(cls, *e.args)
+
+        if parsed.type != cls.MESSAGE_TYPE_VALUE:
+            raise DataParseError(cls, f"'type' field must be {cls.MESSAGE_TYPE_VALUE}")
+
+        parsed.paused = ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            bool,
+            "paused",
+            parsed.paused,
+            True
+        )
+
+        parsed.playbackRate = ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            float,
+            "playbackRate",
+            parsed.playbackRate,
+            True
+        )
+
+        parsed.currentTime = ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            float,
+            "currentTime",
+            parsed.currentTime,
+            True
+        )
+
+        parsed.uuid = well_defined(ensure_constructed_rethrow_type_or_value_error(
+            cls,
+            str,
+            "uuid",
+            parsed.uuid,
+            False,
+            is_user_uuid
+        ))
+
+        return parsed
+
+
 type Message = (
     ErrorMessage |
     ServerHandshakeRequestMessage |
@@ -894,7 +954,8 @@ type Message = (
     StopFollowingMessage |
     RequestVideoInfoMessage |
     KeepAliveMessage |
-    NotifyMessage
+    NotifyMessage |
+    PlaybackControlMessage
 )
 
 type ReceivableMessage = (
@@ -905,7 +966,8 @@ type ReceivableMessage = (
     UserMessage |
     FollowMessage |
     StopFollowingMessage |
-    RequestVideoInfoMessage
+    RequestVideoInfoMessage |
+    PlaybackControlMessage
 )
 
 receiveable_message_classes: tuple[Type[ReceivableMessage]] = get_args(ReceivableMessage.__value__)
