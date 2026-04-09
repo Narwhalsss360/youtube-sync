@@ -17,7 +17,7 @@ from configuration import (
     INITIAL_HEARTBEAT_DELAY,
     KEEP_ALIVE_INTERVAL,
 )
-from websockets import ConnectionClosed, ConnectionClosedOK, LoggerLike
+from websockets import ConnectionClosed, ConnectionClosedOK
 from websockets.asyncio.server import Server, ServerConnection, serve
 from ytsync_types import (
     AcknowledgeMessage,

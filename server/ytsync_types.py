@@ -513,6 +513,7 @@ class User:
         self.hostingOptions = new_data.hostingOptions
         self.followingOptions = new_data.followingOptions
         self.reconnectToServerOnLoss = new_data.reconnectToServerOnLoss
+        self.videoQueue = new_data.videoQueue
         return self
 
 
