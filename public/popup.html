@@ -33,8 +33,36 @@
         </div>
         <div id="settings-accordion-content" class="accordion-content settings-content" accordion-kind="content">
           <div class="checkbox-container">
-            <input id="wait-for-buffering-followers-checkbox" type="checkbox">
-            <span for="wait-for-buffering-followers-checkbox" class="text-div-dark">Wait for buffering followers</span>
+            <input id="popup-notifications-checkbox" type="checkbox" disabled>
+            <div for="popup-notifications-checkbox" class="text-div-dark">Popup notifications</div>
+          </div>
+          <div class="checkbox-container">
+            <input id="wait-for-buffering-followers-checkbox" type="checkbox" disabled>
+            <div for="wait-for-buffering-followers-checkbox" class="text-div-dark">Wait for buffering followers</div>
+          </div>
+          <div class="checkbox-container">
+            <input id="share-queue-checkbox" type="checkbox" disabled>
+            <div for="share-queue-checkbox" class="text-div-dark">Share queue</div>
+          </div>
+          <div class="labeled-input-container">
+            <div class="text-div-dark">Wait on deviation (s)</div>
+            <input id="wait-on-deviation-input" type="number" disabled>
+          </div>
+          <div class="labeled-select-container">
+            <div class="text-div-dark">On degraded connection</div>
+            <select id="on-degraded-connection-continuation-option-select" disabled>
+              <option value="nothing">Do nothing</option>
+              <option value="pause">Pause</option>
+              <option value="break">Break follow</option>
+            </select>
+          </div>
+          <div class="labeled-select-container">
+            <div class="text-div-dark">On host degraded connection</div>
+            <select id="on-host-degraded-connection-continuation-option-select" disabled>
+              <option value="nothing">Do nothing</option>
+              <option value="pause">Pause</option>
+              <option value="break">Break follow</option>
+            </select>
           </div>
         </div>
       </div>

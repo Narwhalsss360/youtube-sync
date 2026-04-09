@@ -24,7 +24,11 @@ import {
   Notification,
   NotificationDismissedMessage,
   isOpenNotificationsMessage,
-  UserMessage
+  UserMessage,
+  ServiceSettingsUpdatesMessage,
+  ServiceSettingsUpdates,
+  isEnumValue,
+  ContinuationOption
 } from "./types";
 import "./accordions";
 import { accordionHeaderAndContent, requireContainerKind, findParent, isAccordionContainer, isExpanded, accordionExpand } from "./accordions";
@@ -147,12 +151,52 @@ const notificationsAccordionContainer: HTMLDivElement = wellDefined(
   constructBadDOMError("Bad notifications accordion containerxt")
 );
 
+const popupNotificationsCheckbox: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("popup-notifications-checkbox"),
+  ),
+  constructBadDOMError("Bad popup notifications checkbox")
+);
+
 const waitForBufferingFollowersCheckbox: HTMLInputElement = wellDefined(
   asType<HTMLInputElement>(
     (element: HTMLElement) => element instanceof HTMLInputElement,
     document.getElementById("wait-for-buffering-followers-checkbox"),
   ),
   constructBadDOMError("Bad wait for buffering followers checkbox")
+);
+
+const shareQueueCheckbox: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("share-queue-checkbox"),
+  ),
+  constructBadDOMError("Bad share queue checkbox")
+);
+
+const waitOnDeviationInput: HTMLInputElement = wellDefined(
+  asType<HTMLInputElement>(
+    (element: HTMLElement) => element instanceof HTMLInputElement,
+    document.getElementById("wait-on-deviation-input"),
+  ),
+  constructBadDOMError("Bad wait on deviation input")
+);
+
+const onDegradedConnectionContinuationOptionSelect: HTMLSelectElement = wellDefined(
+  asType<HTMLSelectElement>(
+    (element: HTMLElement) => element instanceof HTMLSelectElement,
+    document.getElementById("on-degraded-connection-continuation-option-select"),
+  ),
+  constructBadDOMError("Bad on degraded connection continuation option select")
+);
+
+const onHostDegradedConnectionContinuationOptionSelect: HTMLSelectElement = wellDefined(
+  asType<HTMLSelectElement>(
+    (element: HTMLElement) => element instanceof HTMLSelectElement,
+    document.getElementById("on-host-degraded-connection-continuation-option-select"),
+  ),
+  constructBadDOMError("Bad on host degraded connection continuation option select")
 );
 
 const popupState : {
@@ -182,7 +226,8 @@ const popupState : {
     serverAddress: null,
     pendingServerRequests: [],
     availableTabIds: [],
-    notifications: []
+    notifications: [],
+    settings: { popupNotifications: false, waitOnDeviation: 0 }
   },
   usersWithSelf: () => [popupState.packagedServiceState.user, ...popupState.packagedServiceState.users],
 };
@@ -579,9 +624,8 @@ function updateNotificationData(notification: Notification): void {
   }
 }
 
-function applyState(newState: PackagedServiceState) {
+function applyState(newState: PackagedServiceState): void {
   const withSelf = popupState.usersWithSelf();
-  popupState.packagedServiceState = newState;
   if (newState.serverAddress !== null) {
     for (const newUserInfo of [newState.user, ...newState.users]) {
       updateUserData(withSelf.find(user => user.uuid === newUserInfo.uuid), newUserInfo);
@@ -597,6 +641,13 @@ function applyState(newState: PackagedServiceState) {
       }
     }
     connectionAccordionHeaderText.innerText = newState.serverAddress;
+
+    if (popupState.packagedServiceState.user.username !== newState.user.username) {
+      browser.storage.local.set({ lastUsername: newState.user.username });
+    }
+    if (popupState.packagedServiceState.serverAddress !== newState.serverAddress) {
+      browser.storage.local.set({ lastServerAddress: newState.serverAddress });
+    }
   } else {
     popupState.usersDiv.replaceChildren();
     connectionAccordionHeaderText.innerText = "Connection";
@@ -649,8 +700,15 @@ function applyState(newState: PackagedServiceState) {
     disconnectServerAddress.value = newState.serverAddress;
   }
 
+  popupNotificationsCheckbox.checked = newState.settings.popupNotifications;
   waitForBufferingFollowersCheckbox.checked = newState.user.hostingOptions.waitForBufferingFollowers;
+  shareQueueCheckbox.checked = newState.user.hostingOptions.shareQueue;
+  waitOnDeviationInput.value = newState.settings.waitOnDeviation.toString();
+  onDegradedConnectionContinuationOptionSelect.value = newState.user.followingOptions.onDegradedConnectionContinuationOption;
+  onHostDegradedConnectionContinuationOptionSelect.value = newState.user.followingOptions.onHostDegradedConnectionContinuationOption;
+
   enableAllSettings();
+  popupState.packagedServiceState = newState;
 }
 
 function processRuntimeMessage(
@@ -770,7 +828,7 @@ function disconnectFormSubmitted(evt: SubmitEvent): void {
   browser.runtime.sendMessage(disconnectFromServerMessage);
 }
 
-function applyAccordionHeaderPrefixes(textDiv: HTMLDivElement, collapsedPrefix: string, expandedPrefix: string) {
+function applyAccordionHeaderPrefixes(textDiv: HTMLDivElement, collapsedPrefix: string, expandedPrefix: string): void {
   const container: HTMLElement | null = findParent(textDiv, element => isAccordionContainer(element));
   if (!(container instanceof HTMLDivElement)) {
     throw new Error(`The function ${accordionHeaderAndContent.name} is to only be invoked from accordion header target trees with accordion container parent`);
@@ -797,15 +855,25 @@ function applyAccordionHeaderPrefixes(textDiv: HTMLDivElement, collapsedPrefix: 
   new MutationObserver(update).observe(textDiv, { childList: true });
 }
 
-function disableAllSettings() {
+function disableAllSettings(): void {
+  popupNotificationsCheckbox.disabled = true;
   waitForBufferingFollowersCheckbox.disabled = true;
+  shareQueueCheckbox.disabled = true;
+  waitOnDeviationInput.disabled = true;
+  onDegradedConnectionContinuationOptionSelect.disabled = true;
+  onHostDegradedConnectionContinuationOptionSelect.disabled = true;
 }
 
-function enableAllSettings() {
+function enableAllSettings(): void {
+  popupNotificationsCheckbox.disabled = false;
   waitForBufferingFollowersCheckbox.disabled = false;
+  shareQueueCheckbox.disabled = false;
+  waitOnDeviationInput.disabled = false;
+  onDegradedConnectionContinuationOptionSelect.disabled = false;
+  onHostDegradedConnectionContinuationOptionSelect.disabled = false;
 }
 
-function applyNewUserSettings() {
+function applyNewUserSettings(): void {
   disableAllSettings();
   browser.runtime.sendMessage({
     type: MessageTypes.User,
@@ -813,7 +881,15 @@ function applyNewUserSettings() {
   } satisfies UserMessage);
 }
 
-async function main() {
+function applyNewSettings(settingsUpdates: ServiceSettingsUpdates): void {
+  disableAllSettings();
+  browser.runtime.sendMessage({
+    type: MessageTypes.ServiceSettingsUpdates,
+    serviceSettingsUpdates: settingsUpdates
+  } satisfies ServiceSettingsUpdatesMessage);
+}
+
+async function main(): Promise<void> {
   applyState(wellDefinedMessage(
     isPackagedServiceStateMessage,
     MessageTypes.PackagedServiceState,
@@ -822,6 +898,22 @@ async function main() {
 
   if (popupState.packagedServiceState.serverAddress === null) {
     accordionExpand(connectionAccordionContainer);
+
+    const lastUsername: string | undefined = asType<string>(
+      (o) => typeof o === "string",
+      (await browser.storage.local.get("lastUsername")).lastUsername
+    );
+    if (lastUsername !== undefined) {
+      usernameInput.value = lastUsername;
+    }
+
+    const lastServerAddress: string | undefined = asType<string>(
+      (o) => typeof o === "string",
+      (await browser.storage.local.get("lastServerAddress")).lastServerAddress
+    );
+    if (lastServerAddress !== undefined) {
+      serverAddressInput.value = lastServerAddress;
+    }
   }
 
   browser.runtime.onMessage.addListener(processRuntimeMessage);
@@ -835,8 +927,43 @@ async function main() {
   connectAsForm.addEventListener("submit", connectAsFormSubmitted);
   disconnectForm.addEventListener("submit", disconnectFormSubmitted);
 
+  popupNotificationsCheckbox.addEventListener("click", () => {
+    applyNewSettings({
+      popupNotifications: popupNotificationsCheckbox.checked
+    });
+  });
   waitForBufferingFollowersCheckbox.addEventListener("click", () => {
     popupState.packagedServiceState.user.hostingOptions.waitForBufferingFollowers = waitForBufferingFollowersCheckbox.checked;
+    applyNewUserSettings();
+  });
+  shareQueueCheckbox.addEventListener("click", () => {
+    popupState.packagedServiceState.user.hostingOptions.shareQueue = shareQueueCheckbox.checked;
+    applyNewUserSettings();
+  });
+  waitOnDeviationInput.addEventListener("focusout", () => {
+    applyNewSettings({
+      waitOnDeviation: Number(waitOnDeviationInput.value)
+    });
+  });
+  onDegradedConnectionContinuationOptionSelect.addEventListener("change", () => {
+    popupState.packagedServiceState.user.followingOptions.onDegradedConnectionContinuationOption = wellDefined(
+      asType<ContinuationOption>(
+        (s) => isEnumValue(ContinuationOption, s),
+        onDegradedConnectionContinuationOptionSelect.value
+      ),
+      constructBadDOMError("Select option did not match enum value.")
+    );
+    console.log(isEnumValue<ContinuationOption>(ContinuationOption, onDegradedConnectionContinuationOptionSelect.value));
+    applyNewUserSettings();
+  });
+  onHostDegradedConnectionContinuationOptionSelect.addEventListener("change", () => {
+    popupState.packagedServiceState.user.followingOptions.onHostDegradedConnectionContinuationOption = wellDefined(
+      asType<ContinuationOption>(
+        (s) => isEnumValue(ContinuationOption, s),
+        onHostDegradedConnectionContinuationOptionSelect.value
+      ),
+      constructBadDOMError("Select option did not match enum value.")
+    );
     applyNewUserSettings();
   });
 

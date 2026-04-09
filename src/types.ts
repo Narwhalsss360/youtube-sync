@@ -414,7 +414,7 @@ export function detectUserFollowingOptionsUpdates(userFollowingOptions: UserFoll
 
 export const userFollowingOptionsDefaults: Readonly<UserFollowingOptions> = Object.freeze({
   onDegradedConnectionContinuationOption: ContinuationOption.Nothing,
-  onHostDegradedConnectionContinuationOption: ContinuationOption.Nothing
+  onHostDegradedConnectionContinuationOption: ContinuationOption.BreakFollow
 });
 
 export interface User {
@@ -563,6 +563,31 @@ export function isNotification(object: any | null | undefined): object is Notifi
   return true;
 }
 
+export interface ServiceSettings {
+  waitOnDeviation: number,
+  popupNotifications: boolean
+}
+
+export function isServiceSettings(object: any | null | undefined): object is ServiceSettings {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (typeof object.waitOnDeviation !== "number") {
+    return false;
+  }
+
+  if (typeof object.popupNotifications !== "boolean") {
+    return false;
+  }
+
+  return true;
+}
+
 export interface PackagedServiceState {
   user: User,
   users: Array<User>,
@@ -570,7 +595,8 @@ export interface PackagedServiceState {
   serverAddress: string | null,
   pendingServerRequests: Array<GenericMessage>,
   availableTabIds: Array<number>,
-  notifications: Array<Notification>
+  notifications: Array<Notification>,
+  settings: ServiceSettings
 };
 
 export function isPackagedServiceState(object: any | null | undefined): object is PackagedServiceState {
@@ -642,6 +668,10 @@ export function isPackagedServiceState(object: any | null | undefined): object i
     }
   }
 
+  if (!isServiceSettings(object.settings)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -698,7 +728,8 @@ export enum MessageTypes {
   NotificationDismissed = "notification-dismissed",
   OpenNotifications = "open-notifications",
   QueueUpdate = "queue-update",
-  PlaybackControl = "playback-control"
+  PlaybackControl = "playback-control",
+  ServiceSettingsUpdates = "service-settings-updates"
 };
 
 export interface GenericMessage {
@@ -1308,6 +1339,59 @@ export function isPlaybackControlMessage(object: any | null | undefined): object
   return true;
 }
 
+export type ServiceSettingsUpdates = {
+  [key in keyof ServiceSettings]?: ServiceSettings[key] | undefined
+};
+
+export function isServiceSettingsUpdates(object: any | null | undefined): object is ServiceSettingsUpdates {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.waitOnDeviation !== undefined) {
+    if (typeof object.waitOnDeviation !== "number") {
+      return false;
+    }
+  }
+
+  if (object.popupNotifications !== undefined) {
+    if (typeof object.popupNotifications !== "boolean") {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export interface ServiceSettingsUpdatesMessage extends GenericMessage {
+  type: MessageTypes.ServiceSettingsUpdates,
+  serviceSettingsUpdates: ServiceSettingsUpdates
+};
+
+export function isServiceSettingsUpdatesMessage(object: any | null | undefined): object is ServiceSettingsUpdatesMessage {
+  if (typeof object !== "object") {
+    return false;
+  }
+
+  if (object === null) {
+    return false;
+  }
+
+  if (object.type !== MessageTypes.ServiceSettingsUpdates) {
+    return false;
+  }
+
+  if (!isServiceSettingsUpdates(object.serviceSettingsUpdates)) {
+    return false;
+  }
+
+  return true;
+}
+
 export type Message = (
   GenericMessage |
   ErrorMessage |
@@ -1331,7 +1415,8 @@ export type Message = (
   NotificationDismissedMessage |
   OpenNotificationsMessage |
   QueueUpdateMessage |
-  PlaybackControlMessage
+  PlaybackControlMessage |
+  ServiceSettingsUpdatesMessage
 );
 
 export function wellDefinedMessage<T extends Message>(
@@ -1368,27 +1453,3 @@ export function wellDefinedMessage<T extends Message>(
   return object
 }
 
-export interface ServiceSettings {
-  waitOnDeviation: number,
-  popupNotifications: boolean
-}
-
-export function isServiceSettings(object: any | null | undefined): object is ServiceSettings {
-  if (typeof object !== "object") {
-    return false;
-  }
-
-  if (object === null) {
-    return false;
-  }
-
-  if (typeof object.waitOnDeviation !== "number") {
-    return false;
-  }
-
-  if (typeof object.popupNotifications !== "boolean") {
-    return false;
-  }
-
-  return true;
-}

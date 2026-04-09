@@ -50,7 +50,8 @@ import {
   PlaybackControlMessage,
   ServiceSettings,
   isServiceSettings,
-  isUser
+  isUser,
+  isServiceSettingsUpdatesMessage
 } from "./types"
 
 const acknowledgeMessage: Readonly<AcknowledgeMessage> = Object.freeze({
@@ -87,7 +88,8 @@ function packageServiceState(): PackagedServiceState {
     serverAddress: serviceState.serverConnection?.url ?? null,
     pendingServerRequests: serviceState.pendingServerRequests,
     availableTabIds: Array.from(serviceState.contentPorts).map(port => wellDefined(port.sender?.tab?.id, new Error("Every content port must have a tab id"))),
-    notifications: serviceState.notifications
+    notifications: serviceState.notifications,
+    settings: serviceState.settings
   };
 }
 
@@ -1107,6 +1109,24 @@ function processRuntimeMessage(
 
       processSelfUpdateFromRuntime(userMessage.user);
       persist();
+      break;
+    }
+    case MessageTypes.ServiceSettingsUpdates: {
+      const serviceSettingsUpdatesMessage = wellDefinedMessage(isServiceSettingsUpdatesMessage, MessageTypes.ServiceSettingsUpdates, message);
+      if (Object.keys(serviceSettingsUpdatesMessage.serviceSettingsUpdates).length === 0) {
+        break;
+      }
+
+      if (serviceSettingsUpdatesMessage.serviceSettingsUpdates.popupNotifications !== undefined) {
+        serviceState.settings.popupNotifications = serviceSettingsUpdatesMessage.serviceSettingsUpdates.popupNotifications;
+      }
+
+      if (serviceSettingsUpdatesMessage.serviceSettingsUpdates.waitOnDeviation !== undefined) {
+        serviceState.settings.waitOnDeviation = serviceSettingsUpdatesMessage.serviceSettingsUpdates.waitOnDeviation;
+      }
+
+      const packagedServiceStateMessage = broadcastPackagedStateToRuntime();
+      serviceState.activeTabPort?.postMessage(packagedServiceStateMessage);
       break;
     }
     default: {
