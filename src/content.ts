@@ -1,6 +1,32 @@
 import browser = chrome;
 import { ErrorMessageReceived }  from "./errors";
-import {  arrayEquals, asType, detectQueuedVideoInfoUpdates, isErrorMessage, isGenericMessage, isPackagedServiceStateMessage, isPlaybackControlMessage, isRequestVideoInfoMessage, isSetActiveTabMessage, Message, MessageTypes, NotifyMessage, PackagedServiceState, PlaybackControlMessage, PlaybackInfo, PlaybackState, QueuedVideoInfo, QueueUpdateMessage, SetActiveTabMessage, User, VideoInfo, VideoInfoMessage, VideoQueue, wellDefined, wellDefinedMessage } from "./types";
+import {
+  arrayEquals,
+  asType,
+  detectQueuedVideoInfoUpdates,
+  isErrorMessage,
+  isGenericMessage,
+  isPackagedServiceStateMessage,
+  isPlaybackControlMessage,
+  isRequestVideoInfoMessage,
+  isSetActiveTabMessage,
+  Message,
+  MessageTypes,
+  NotifyMessage,
+  PackagedServiceState,
+  PlaybackControlMessage,
+  PlaybackInfo,
+  PlaybackState,
+  QueuedVideoInfo,
+  QueueUpdateMessage,
+  SetActiveTabMessage,
+  User,
+  VideoInfo,
+  VideoInfoMessage,
+  VideoQueue,
+  wellDefined,
+  wellDefinedMessage
+} from "./types";
 
 const ytIcons: NodeListOf<HTMLLinkElement> = document.querySelectorAll("link[rel~='icon']");
 const ogYTIconRef: string = wellDefined(ytIcons[0], new Error("Expected at least one icon link.")).href;
@@ -426,53 +452,71 @@ const PLAYBACK_SYNC_NOTIFICATION_INTERVAL: number = 60000;
 let notifyOfPlaybackSynchronization: boolean = true;
 let mouseX: number = 0;
 
-function follow(user: User): Promise<void> {
+function showControls() {
+  const controls: HTMLElement | null = document.querySelector(".ytp-chrome-bottom");
+  controls?.dispatchEvent(new MouseEvent("mousemove",  { bubbles: true, cancelable: false, clientX: mouseX }));
+  mouseX = mouseX === 0 ? 1 : 0;
+}
+
+async function follow(user: User): Promise<void> {
   if (user.videoInfo === null) {
     console.log("Following a user that is not watching a video. Doing nothing");
-    return Promise.resolve();
+    return;
   }
 
   if (user.videoInfo.videoId !== new URLSearchParams(window.location.search).get("v")) {
     window.location.assign(`https://youtube.com/watch?v=${user.videoInfo.videoId}`);
-    return Promise.resolve();
+    return;
   }
 
-  return waitForVideoElement().then(video => {
-    const controls: HTMLElement | null = document.querySelector(".ytp-chrome-bottom");
-    const showControls = controls === null ? () => {} : () => {
-      controls.dispatchEvent(new MouseEvent("mousemove",  { bubbles: true, cancelable: false, clientX: mouseX }));
-      mouseX = mouseX === 0 ? 1 : 0;
-    };
-    if (user.videoInfo === null) {
-      return;
-    }
+  const video: HTMLVideoElement = await waitForVideoElement();
 
-    if (video.readyState <= 2) {
-      return;
-    }
+  if (user.videoInfo === null) {
+    return;
+  }
 
-    if (user.videoInfo.playbackInfo.state === PlaybackState.Waiting) {
-      if (!video.paused) {
-        video.pause();
-        video.currentTime = user.videoInfo.playbackInfo.currentTime;
-        const notifyMessage: NotifyMessage = {
-          type: MessageTypes.Notify,
-          notification: {
-            epoch: Date.now(),
-            sender: "Follower",
-            message: `${user.username} is buffering.`,
-            dismissed: false
-          }
-        };
-        browser.runtime.sendMessage(notifyMessage);
-        showControls();
+  if (video.readyState <= 2) {
+    return;
+  }
+
+  if (user.videoInfo.playbackInfo.state === PlaybackState.Waiting) {
+    if (!video.paused) {
+      video.pause();
+      video.currentTime = user.videoInfo.playbackInfo.currentTime;
+      const notifyMessage: NotifyMessage = {
+        type: MessageTypes.Notify,
+        notification: {
+          epoch: Date.now(),
+          sender: "Follower",
+          message: `${user.username} is buffering.`,
+          dismissed: false
+        }
+      };
+      browser.runtime.sendMessage(notifyMessage);
+      showControls();
+    }
+    notifyOfPlaybackSynchronization = true;
+    return
+  }
+
+  if (user.videoInfo.playbackInfo.playbackRate !== video.playbackRate) {
+    video.playbackRate = user.videoInfo.playbackInfo.playbackRate;
+    const notifyMessage: NotifyMessage = {
+      type: MessageTypes.Notify,
+      notification: {
+        epoch: Date.now(),
+        sender: "Follower",
+        message: `${user.username} playback rate synchronization: ${video.playbackRate}.`,
+        dismissed: false
       }
-      notifyOfPlaybackSynchronization = true;
-      return
-    }
+    };
+    browser.runtime.sendMessage(notifyMessage);
+    showControls();
+  }
 
-    if (user.videoInfo.playbackInfo.playbackRate !== video.playbackRate) {
-      video.playbackRate = user.videoInfo.playbackInfo.playbackRate;
+  if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
+    if (!video.paused) {
+      video.pause();
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
         notification: {
@@ -485,76 +529,59 @@ function follow(user: User): Promise<void> {
       browser.runtime.sendMessage(notifyMessage);
       showControls();
     }
-
-    if (user.videoInfo.playbackInfo.state === PlaybackState.Paused) {
-      if (!video.paused) {
-        video.pause();
-        const notifyMessage: NotifyMessage = {
-          type: MessageTypes.Notify,
-          notification: {
-            epoch: Date.now(),
-            sender: "Follower",
-            message: `${user.username} playback rate synchronization: ${video.playbackRate}.`,
-            dismissed: false
-          }
-        };
-        browser.runtime.sendMessage(notifyMessage);
-        showControls();
-      }
-      if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
-        video.currentTime = user.videoInfo.playbackInfo.currentTime;
-        const notifyMessage: NotifyMessage = {
-          type: MessageTypes.Notify,
-          notification: {
-            epoch: Date.now(),
-            sender: "Follower",
-            message: `${user.username} synchronizing paused time.`,
-            dismissed: false
-          }
-        };
-        browser.runtime.sendMessage(notifyMessage);
-      }
-      notifyOfPlaybackSynchronization = true;
-      return;
-    }
-
-    if (video.paused) {
+    if (video.currentTime !== user.videoInfo.playbackInfo.currentTime) {
       video.currentTime = user.videoInfo.playbackInfo.currentTime;
-      video.play();
       const notifyMessage: NotifyMessage = {
         type: MessageTypes.Notify,
         notification: {
           epoch: Date.now(),
           sender: "Follower",
-          message: `${user.username} playing.`,
+          message: `${user.username} synchronizing paused time.`,
           dismissed: false
         }
       };
-      showControls();
       browser.runtime.sendMessage(notifyMessage);
-      return;
     }
+    notifyOfPlaybackSynchronization = true;
+    return;
+  }
 
-    if (Math.abs(user.videoInfo.playbackInfo.currentTime - video.currentTime) > moduleState.maxDeviation) {
-      video.currentTime = user.videoInfo.playbackInfo.currentTime;
-      if (notifyOfPlaybackSynchronization) {
-        const notifyMessage: NotifyMessage = {
-          type: MessageTypes.Notify,
-          notification: {
-            epoch: Date.now(),
-            sender: "Follower",
-            message: `${user.username} synchronizing playback time.`,
-            dismissed: false
-          }
-        };
-        browser.runtime.sendMessage(notifyMessage);
-        notifyOfPlaybackSynchronization = false;
-        showControls();
-        setTimeout(() => notifyOfPlaybackSynchronization = true, PLAYBACK_SYNC_NOTIFICATION_INTERVAL);
+  if (video.paused) {
+    video.currentTime = user.videoInfo.playbackInfo.currentTime;
+    video.play();
+    const notifyMessage: NotifyMessage = {
+      type: MessageTypes.Notify,
+      notification: {
+        epoch: Date.now(),
+        sender: "Follower",
+        message: `${user.username} playing.`,
+        dismissed: false
       }
+    };
+    showControls();
+    browser.runtime.sendMessage(notifyMessage);
+    return;
+  }
+
+  if (Math.abs(user.videoInfo.playbackInfo.currentTime - video.currentTime) > moduleState.maxDeviation) {
+    video.currentTime = user.videoInfo.playbackInfo.currentTime;
+    if (notifyOfPlaybackSynchronization) {
+      const notifyMessage: NotifyMessage = {
+        type: MessageTypes.Notify,
+        notification: {
+          epoch: Date.now(),
+          sender: "Follower",
+          message: `${user.username} synchronizing playback time.`,
+          dismissed: false
+        }
+      };
+      browser.runtime.sendMessage(notifyMessage);
+      notifyOfPlaybackSynchronization = false;
+      showControls();
+      setTimeout(() => notifyOfPlaybackSynchronization = true, PLAYBACK_SYNC_NOTIFICATION_INTERVAL);
     }
-  });
-}
+  }
+  }
 
 function processPortMessage(
   message: Message,
